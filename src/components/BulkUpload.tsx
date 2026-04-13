@@ -75,12 +75,21 @@ export function BulkUpload({ onClose, users, existingHospitals }: BulkUploadProp
         for (const row of results.data as any[]) {
           try {
             const hospitalName = row['Hospital Name'] || row['name'] || row['Hospital'];
-            if (!hospitalName) {
-              throw new Error('Missing Hospital Name column');
+            const appNo = row['Application No'] || row['applicationNo'] || row['App No'];
+
+            if (!hospitalName && !appNo) {
+              throw new Error('Missing Hospital Name or Application Number');
             }
 
-            // Find existing hospital by name (case-insensitive)
-            const existing = existingHospitals.find(h => h.name.toLowerCase() === hospitalName.trim().toLowerCase());
+            // Find existing hospital primarily by Application Number, fallback to Name
+            let existing = null;
+            if (appNo) {
+              existing = existingHospitals.find(h => h.applicationNo === appNo.trim());
+            }
+            
+            if (!existing && hospitalName) {
+              existing = existingHospitals.find(h => h.name.toLowerCase() === hospitalName.trim().toLowerCase());
+            }
 
             // Map Team Member Name to UID
             const teamMemberName = row['Team Member'] || row['Assigned To'] || row['assignedTo'] || row['Team Member Name'];

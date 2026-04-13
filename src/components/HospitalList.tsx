@@ -18,7 +18,8 @@ import {
   UserCheck,
   X,
   Loader2,
-  ChevronDown
+  ChevronDown,
+  AlertCircle
 } from 'lucide-react';
 import { format, parseISO, isBefore, isAfter } from 'date-fns';
 import { db } from '../firebase';
@@ -562,7 +563,11 @@ export function HospitalList({ hospitals, users, interactions, isAdmin }: Hospit
 
       {/* Add Hospital Modal (Simplified) */}
       {isAdding && (
-        <AddHospitalModal users={users} onClose={() => setIsAdding(false)} />
+        <AddHospitalModal 
+          users={users} 
+          hospitals={hospitals}
+          onClose={() => setIsAdding(false)} 
+        />
       )}
       {isBulkUploading && (
         <BulkUpload 
@@ -874,7 +879,7 @@ function LogInteractionModal({ hospital, interactions, users, onClose }: {
   );
 }
 
-function AddHospitalModal({ users, onClose }: { users: User[], onClose: () => void }) {
+function AddHospitalModal({ users, hospitals, onClose }: { users: User[], hospitals: Hospital[], onClose: () => void }) {
   const [formData, setFormData] = useState({
     name: '',
     state: '',
@@ -893,11 +898,21 @@ function AddHospitalModal({ users, onClose }: { users: User[], onClose: () => vo
     contactPerson: '',
     contactNumber: ''
   });
+  const [error, setError] = useState<string | null>(null);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setError(null);
+
+    // Check for duplicate Application Number
+    const duplicate = hospitals.find(h => h.applicationNo === formData.applicationNo.trim());
+    if (duplicate) {
+      setError(`A hospital with Application No "${formData.applicationNo}" already exists (${duplicate.name}).`);
+      return;
+    }
+
     try {
-      const dataToSave: any = { ...formData };
+      const dataToSave: any = { ...formData, applicationNo: formData.applicationNo.trim() };
       if (!dataToSave.reapplied) {
         delete dataToSave.reappliedProgram;
         delete dataToSave.renewalApplicationNo;
@@ -916,7 +931,20 @@ function AddHospitalModal({ users, onClose }: { users: User[], onClose: () => vo
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-stone-900/20 backdrop-blur-sm">
       <div className="bg-white w-full max-w-2xl rounded-3xl shadow-2xl p-8 max-h-[90vh] overflow-y-auto">
-        <h3 className="text-2xl font-serif font-bold text-stone-900 mb-6">Add New Hospital</h3>
+        <div className="flex items-center justify-between mb-6">
+          <h3 className="text-2xl font-serif font-bold text-stone-900">Add New Hospital</h3>
+          <button onClick={onClose} className="p-2 hover:bg-stone-100 rounded-full transition-colors">
+            <X className="w-6 h-6 text-stone-400" />
+          </button>
+        </div>
+
+        {error && (
+          <div className="mb-6 p-4 bg-red-50 border border-red-100 rounded-2xl flex items-start gap-3 text-red-600 text-sm animate-in fade-in slide-in-from-top-2">
+            <AlertCircle className="w-5 h-5 shrink-0" />
+            <p>{error}</p>
+          </div>
+        )}
+
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="md:col-span-2">
