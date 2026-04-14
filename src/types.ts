@@ -25,6 +25,8 @@ export interface Hospital {
   status: 'Active' | 'Expired' | 'Pending Renewal';
   contactPerson?: string;
   contactNumber?: string;
+  alternateNumber?: string;
+  designation?: string;
 }
 
 export interface Interaction {

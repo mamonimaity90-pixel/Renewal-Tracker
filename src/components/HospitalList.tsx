@@ -19,9 +19,11 @@ import {
   X,
   Loader2,
   ChevronDown,
-  AlertCircle
+  AlertCircle,
+  Download
 } from 'lucide-react';
 import { format, parseISO, isBefore, isAfter } from 'date-fns';
+import Papa from 'papaparse';
 import { db } from '../firebase';
 import { collection, addDoc, updateDoc, doc, writeBatch } from 'firebase/firestore';
 import { cn } from '../lib/utils';
@@ -167,6 +169,39 @@ export function HospitalList({ hospitals, users, interactions, isAdmin }: Hospit
     }
   };
 
+  const handleExportCSV = () => {
+    const dataToExport = filteredHospitals.map(h => ({
+      'Hospital Name': h.name,
+      'Application No': h.applicationNo,
+      'State': h.state,
+      'District': h.district,
+      'Pincode': h.pincode,
+      'Beds': h.beds,
+      'Expiry Date': h.expiryDate ? format(parseISO(h.expiryDate), 'dd-MM-yyyy') : '',
+      'Status': h.status,
+      'Contact Person': h.contactPerson || '',
+      'Designation': h.designation || '',
+      'Contact Number': h.contactNumber || '',
+      'Alternate Number': h.alternateNumber || '',
+      'Assigned To': users.find(u => u.uid === h.assignedTo)?.name || 'Unassigned',
+      'Reapplied': h.reapplied ? 'Yes' : 'No',
+      'Reapplied Program': h.reappliedProgram || '',
+      'Renewal App No': h.renewalApplicationNo || '',
+      'Renewal App Date': h.renewalApplicationDate ? format(parseISO(h.renewalApplicationDate), 'dd-MM-yyyy') : ''
+    }));
+
+    const csv = Papa.unparse(dataToExport);
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    link.setAttribute('href', url);
+    link.setAttribute('download', `Hospitals_Export_${format(new Date(), 'yyyy-MM-dd')}.csv`);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
@@ -176,6 +211,13 @@ export function HospitalList({ hospitals, users, interactions, isAdmin }: Hospit
         </header>
         {isAdmin && (
           <div className="flex gap-3">
+            <button 
+              onClick={handleExportCSV}
+              className="flex items-center gap-2 bg-white border border-stone-200 text-stone-600 px-6 py-3 rounded-xl hover:bg-stone-50 transition-colors"
+            >
+              <Download className="w-5 h-5" />
+              Export Table Data
+            </button>
             <button 
               onClick={() => setIsBulkUploading(true)}
               className="flex items-center gap-2 bg-stone-100 text-stone-600 px-6 py-3 rounded-xl hover:bg-stone-200 transition-colors"
@@ -426,8 +468,18 @@ export function HospitalList({ hospitals, users, interactions, isAdmin }: Hospit
                   </td>
                   <td className="p-4">
                     <div className="flex flex-col text-sm">
-                      <span className="font-medium text-stone-700">{hospital.contactPerson || '—'}</span>
-                      <span className="text-xs text-stone-400">{hospital.contactNumber || '—'}</span>
+                      <div className="flex items-center gap-2">
+                        <span className="font-medium text-stone-700">{hospital.contactPerson || '—'}</span>
+                        {hospital.designation && (
+                          <span className="text-[10px] bg-stone-100 text-stone-500 px-1.5 py-0.5 rounded font-bold uppercase">{hospital.designation}</span>
+                        )}
+                      </div>
+                      <div className="flex flex-col">
+                        <span className="text-xs text-stone-400">{hospital.contactNumber || '—'}</span>
+                        {hospital.alternateNumber && (
+                          <span className="text-[10px] text-stone-400 italic">Alt: {hospital.alternateNumber}</span>
+                        )}
+                      </div>
                     </div>
                   </td>
                   <td className="p-4 text-sm text-stone-600">
@@ -910,6 +962,8 @@ function EditHospitalModal({ hospital, users, onClose }: {
     assignedTo: hospital.assignedTo || '',
     contactPerson: hospital.contactPerson || '',
     contactNumber: hospital.contactNumber || '',
+    alternateNumber: hospital.alternateNumber || '',
+    designation: hospital.designation || '',
     status: hospital.status
   });
 
@@ -996,11 +1050,27 @@ function EditHospitalModal({ hospital, users, onClose }: {
               />
             </div>
             <div>
+              <label className="block text-xs font-bold text-stone-400 uppercase mb-1">Designation</label>
+              <input
+                className="w-full p-3 bg-stone-50 border-none rounded-xl"
+                value={formData.designation}
+                onChange={e => setFormData({...formData, designation: e.target.value})}
+              />
+            </div>
+            <div>
               <label className="block text-xs font-bold text-stone-400 uppercase mb-1">Contact Number</label>
               <input
                 className="w-full p-3 bg-stone-50 border-none rounded-xl"
                 value={formData.contactNumber}
                 onChange={e => setFormData({...formData, contactNumber: e.target.value})}
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-stone-400 uppercase mb-1">Alternate Number</label>
+              <input
+                className="w-full p-3 bg-stone-50 border-none rounded-xl"
+                value={formData.alternateNumber}
+                onChange={e => setFormData({...formData, alternateNumber: e.target.value})}
               />
             </div>
           </div>
@@ -1144,7 +1214,9 @@ function AddHospitalModal({ users, hospitals, onClose }: { users: User[], hospit
     assignedTo: '',
     status: 'Active' as const,
     contactPerson: '',
-    contactNumber: ''
+    contactNumber: '',
+    alternateNumber: '',
+    designation: ''
   });
   const [error, setError] = useState<string | null>(null);
 
@@ -1235,11 +1307,27 @@ function AddHospitalModal({ users, hospitals, onClose }: { users: User[], hospit
               />
             </div>
             <div>
+              <label className="block text-xs font-bold text-stone-400 uppercase mb-1">Designation</label>
+              <input
+                className="w-full p-3 bg-stone-50 border-none rounded-xl"
+                value={formData.designation}
+                onChange={e => setFormData({...formData, designation: e.target.value})}
+              />
+            </div>
+            <div>
               <label className="block text-xs font-bold text-stone-400 uppercase mb-1">Contact Number</label>
               <input
                 className="w-full p-3 bg-stone-50 border-none rounded-xl"
                 value={formData.contactNumber}
                 onChange={e => setFormData({...formData, contactNumber: e.target.value})}
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-stone-400 uppercase mb-1">Alternate Number</label>
+              <input
+                className="w-full p-3 bg-stone-50 border-none rounded-xl"
+                value={formData.alternateNumber}
+                onChange={e => setFormData({...formData, alternateNumber: e.target.value})}
               />
             </div>
           </div>

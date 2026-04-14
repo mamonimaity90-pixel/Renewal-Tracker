@@ -154,13 +154,14 @@ export function BulkUpload({ onClose, users, existingHospitals }: BulkUploadProp
                 throw new Error('Missing Hospital Name or Application Number');
               }
 
-              // Find existing hospital primarily by Application Number, fallback to Name
+              // Find existing hospital primarily by Application Number
               let existing = null;
               if (appNo) {
                 existing = hospitalByAppNo.get(String(appNo).trim());
               }
               
-              if (!existing && hospitalName) {
+              // Only fallback to name if application number is NOT provided in the row
+              if (!existing && !appNo && hospitalName) {
                 existing = hospitalByName.get(String(hospitalName).toLowerCase().trim());
               }
 
@@ -217,6 +218,8 @@ export function BulkUpload({ onClose, users, existingHospitals }: BulkUploadProp
                 expiryDate: parsedExpiry || existing?.expiryDate,
                 contactPerson: getCellValue(row, ['Contact Person', 'contactPerson', 'Contact', 'SPOC', 'Admin Name', 'Contact Name', 'Person Name']) || existing?.contactPerson || '',
                 contactNumber: getCellValue(row, ['Contact Number', 'contactNumber', 'Phone', 'Mobile', 'SPOC Phone', 'SPOC Number', 'Contact No', 'Phone Number', 'Mobile Number']) || existing?.contactNumber || '',
+                alternateNumber: getCellValue(row, ['Alternate Number', 'alternateNumber', 'Alt Number', 'Secondary Phone', 'Alt Phone', 'Alternate Phone']) || existing?.alternateNumber || '',
+                designation: getCellValue(row, ['Designation', 'designation', 'Role', 'Position', 'SPOC Designation']) || existing?.designation || '',
                 reapplied: String(getCellValue(row, ['Reapplied Y/N', 'reapplied', 'Reapplied', 'Is Reapplied']) || '').toLowerCase().startsWith('y') || getCellValue(row, ['reapplied']) === true || (existing?.reapplied ?? false),
                 reappliedProgram: getCellValue(row, ['If reapplied yes, Program under which reapplied', 'reappliedProgram', 'Program', 'New Program', 'Reapplied Program']) || existing?.reappliedProgram || '',
                 renewalApplicationNo: getCellValue(row, ['Renewal Application No', 'renewalApplicationNo', 'Renewal App No', 'Renewal ID']) || existing?.renewalApplicationNo || '',
