@@ -42,6 +42,7 @@ export function HospitalList({ hospitals, users, interactions, isAdmin }: Hospit
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
   const [isAdding, setIsAdding] = useState(false);
   const [isBulkUploading, setIsBulkUploading] = useState(false);
+  const [editingHospital, setEditingHospital] = useState<Hospital | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [currentPage, setCurrentPage] = useState(1);
   const [isBulkAssigning, setIsBulkAssigning] = useState(false);
@@ -497,7 +498,10 @@ export function HospitalList({ hospitals, users, interactions, isAdmin }: Hospit
                     </span>
                   </td>
                   <td className="p-4 text-right">
-                    <button className="p-2 text-stone-400 hover:text-stone-900 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <button 
+                      onClick={() => setEditingHospital(hospital)}
+                      className="p-2 text-stone-400 hover:text-stone-900 opacity-0 group-hover:opacity-100 transition-opacity"
+                    >
                       <MoreVertical className="w-5 h-5" />
                     </button>
                   </td>
@@ -574,6 +578,13 @@ export function HospitalList({ hospitals, users, interactions, isAdmin }: Hospit
           onClose={() => setIsBulkUploading(false)} 
           users={users}
           existingHospitals={hospitals}
+        />
+      )}
+      {editingHospital && (
+        <EditHospitalModal
+          hospital={editingHospital}
+          users={users}
+          onClose={() => setEditingHospital(null)}
         />
       )}
       {activeHospitalId && (
@@ -879,6 +890,244 @@ function LogInteractionModal({ hospital, interactions, users, onClose }: {
   );
 }
 
+function EditHospitalModal({ hospital, users, onClose }: { 
+  hospital: Hospital, 
+  users: User[], 
+  onClose: () => void 
+}) {
+  const [formData, setFormData] = useState({
+    name: hospital.name,
+    state: hospital.state,
+    district: hospital.district,
+    pincode: hospital.pincode,
+    beds: hospital.beds,
+    applicationNo: hospital.applicationNo,
+    expiryDate: hospital.expiryDate,
+    reapplied: hospital.reapplied,
+    reappliedProgram: hospital.reappliedProgram || '',
+    renewalApplicationNo: hospital.renewalApplicationNo || '',
+    renewalApplicationDate: hospital.renewalApplicationDate ? format(parseISO(hospital.renewalApplicationDate), 'yyyy-MM-dd') : '',
+    assignedTo: hospital.assignedTo || '',
+    contactPerson: hospital.contactPerson || '',
+    contactNumber: hospital.contactNumber || '',
+    status: hospital.status
+  });
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      const dataToSave: any = { ...formData, applicationNo: formData.applicationNo.trim() };
+      if (!dataToSave.reapplied) {
+        dataToSave.reappliedProgram = '';
+        dataToSave.renewalApplicationNo = '';
+        dataToSave.renewalApplicationDate = '';
+      } else if (dataToSave.renewalApplicationDate) {
+        dataToSave.renewalApplicationDate = new Date(dataToSave.renewalApplicationDate).toISOString();
+      }
+      
+      await updateDoc(doc(db, 'hospitals', hospital.id), dataToSave);
+      onClose();
+    } catch (error) {
+      console.error('Update failed:', error);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-stone-900/20 backdrop-blur-sm">
+      <div className="bg-white w-full max-w-2xl rounded-3xl shadow-2xl p-8 max-h-[90vh] overflow-y-auto">
+        <div className="flex items-center justify-between mb-6">
+          <h3 className="text-2xl font-serif font-bold text-stone-900">Edit Hospital Details</h3>
+          <button onClick={onClose} className="p-2 hover:bg-stone-100 rounded-full transition-colors">
+            <X className="w-6 h-6 text-stone-400" />
+          </button>
+        </div>
+
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="md:col-span-2">
+              <label className="block text-xs font-bold text-stone-400 uppercase mb-1">Hospital Name</label>
+              <input
+                required
+                className="w-full p-3 bg-stone-50 border-none rounded-xl"
+                value={formData.name}
+                onChange={e => setFormData({...formData, name: e.target.value})}
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-stone-400 uppercase mb-1">Application No</label>
+              <input
+                required
+                className="w-full p-3 bg-stone-50 border-none rounded-xl"
+                value={formData.applicationNo}
+                onChange={e => setFormData({...formData, applicationNo: e.target.value})}
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-stone-400 uppercase mb-1">Status</label>
+              <select
+                className="w-full p-3 bg-stone-50 border-none rounded-xl text-sm"
+                value={formData.status}
+                onChange={e => setFormData({...formData, status: e.target.value as any})}
+              >
+                <option value="Active">Active</option>
+                <option value="Expired">Expired</option>
+                <option value="Pending Renewal">Pending Renewal</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-stone-400 uppercase mb-1">Assigned To</label>
+              <select
+                className="w-full p-3 bg-stone-50 border-none rounded-xl text-sm"
+                value={formData.assignedTo}
+                onChange={e => setFormData({...formData, assignedTo: e.target.value})}
+              >
+                <option value="">Unassigned</option>
+                {users.map(u => (
+                  <option key={u.uid} value={u.uid}>{u.name}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-stone-400 uppercase mb-1">Contact Person</label>
+              <input
+                className="w-full p-3 bg-stone-50 border-none rounded-xl"
+                value={formData.contactPerson}
+                onChange={e => setFormData({...formData, contactPerson: e.target.value})}
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-stone-400 uppercase mb-1">Contact Number</label>
+              <input
+                className="w-full p-3 bg-stone-50 border-none rounded-xl"
+                value={formData.contactNumber}
+                onChange={e => setFormData({...formData, contactNumber: e.target.value})}
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-3 gap-4">
+            <div>
+              <label className="block text-xs font-bold text-stone-400 uppercase mb-1">State</label>
+              <input
+                required
+                className="w-full p-3 bg-stone-50 border-none rounded-xl"
+                value={formData.state}
+                onChange={e => setFormData({...formData, state: e.target.value})}
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-stone-400 uppercase mb-1">District</label>
+              <input
+                required
+                className="w-full p-3 bg-stone-50 border-none rounded-xl"
+                value={formData.district}
+                onChange={e => setFormData({...formData, district: e.target.value})}
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-stone-400 uppercase mb-1">Pincode</label>
+              <input
+                required
+                className="w-full p-3 bg-stone-50 border-none rounded-xl"
+                value={formData.pincode}
+                onChange={e => setFormData({...formData, pincode: e.target.value})}
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-bold text-stone-400 uppercase mb-1">Beds</label>
+              <input
+                type="number"
+                required
+                className="w-full p-3 bg-stone-50 border-none rounded-xl"
+                value={formData.beds}
+                onChange={e => setFormData({...formData, beds: parseInt(e.target.value)})}
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-stone-400 uppercase mb-1">Cert Expiry Date</label>
+              <input
+                type="date"
+                required
+                className="w-full p-3 bg-stone-50 border-none rounded-xl"
+                value={formData.expiryDate ? format(parseISO(formData.expiryDate), 'yyyy-MM-dd') : ''}
+                onChange={e => setFormData({...formData, expiryDate: e.target.value ? new Date(e.target.value).toISOString() : ''})}
+              />
+            </div>
+          </div>
+
+          <div className="p-4 bg-stone-50 rounded-2xl space-y-4">
+            <div className="flex items-center gap-3">
+              <input
+                type="checkbox"
+                id="edit-reapplied"
+                className="w-4 h-4 rounded border-stone-300 text-stone-900 focus:ring-stone-900"
+                checked={formData.reapplied}
+                onChange={e => setFormData({...formData, reapplied: e.target.checked})}
+              />
+              <label htmlFor="edit-reapplied" className="text-sm font-medium text-stone-700">Reapplied for Renewal?</label>
+            </div>
+
+            {formData.reapplied && (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
+                <div>
+                  <label className="block text-xs font-bold text-stone-400 uppercase mb-1">Reapplied Program</label>
+                  <select
+                    className="w-full p-3 bg-white border border-stone-200 rounded-xl text-sm"
+                    value={formData.reappliedProgram}
+                    onChange={e => setFormData({...formData, reappliedProgram: e.target.value})}
+                  >
+                    <option value="">Select Program</option>
+                    <option value="HCO">HCO</option>
+                    <option value="SHCO">SHCO</option>
+                    <option value="ECO">ECO</option>
+                    <option value="ELCP">ELCP</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-stone-400 uppercase mb-1">Renewal App No</label>
+                  <input
+                    className="w-full p-3 bg-white border border-stone-200 rounded-xl text-sm"
+                    value={formData.renewalApplicationNo}
+                    onChange={e => setFormData({...formData, renewalApplicationNo: e.target.value})}
+                  />
+                </div>
+                <div className="md:col-span-2">
+                  <label className="block text-xs font-bold text-stone-400 uppercase mb-1">Renewal App Date</label>
+                  <input
+                    type="date"
+                    className="w-full p-3 bg-white border border-stone-200 rounded-xl text-sm"
+                    value={formData.renewalApplicationDate}
+                    onChange={e => setFormData({...formData, renewalApplicationDate: e.target.value})}
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div className="flex gap-3 pt-4">
+            <button 
+              type="button" 
+              onClick={onClose}
+              className="flex-1 py-3 px-6 rounded-xl text-stone-500 font-medium hover:bg-stone-50 transition-colors"
+            >
+              Cancel
+            </button>
+            <button 
+              type="submit"
+              className="flex-1 py-3 px-6 rounded-xl bg-stone-900 text-white font-medium hover:bg-stone-800 transition-colors"
+            >
+              Update Details
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
 function AddHospitalModal({ users, hospitals, onClose }: { users: User[], hospitals: Hospital[], onClose: () => void }) {
   const [formData, setFormData] = useState({
     name: '',
@@ -892,7 +1141,6 @@ function AddHospitalModal({ users, hospitals, onClose }: { users: User[], hospit
     reappliedProgram: '',
     renewalApplicationNo: '',
     renewalApplicationDate: '',
-    currentProgram: '',
     assignedTo: '',
     status: 'Active' as const,
     contactPerson: '',
@@ -963,14 +1211,6 @@ function AddHospitalModal({ users, hospitals, onClose }: { users: User[], hospit
                 className="w-full p-3 bg-stone-50 border-none rounded-xl"
                 value={formData.applicationNo}
                 onChange={e => setFormData({...formData, applicationNo: e.target.value})}
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-bold text-stone-400 uppercase mb-1">Current Program</label>
-              <input
-                className="w-full p-3 bg-stone-50 border-none rounded-xl"
-                value={formData.currentProgram}
-                onChange={e => setFormData({...formData, currentProgram: e.target.value})}
               />
             </div>
             <div>
@@ -1073,11 +1313,17 @@ function AddHospitalModal({ users, hospitals, onClose }: { users: User[], hospit
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
                 <div>
                   <label className="block text-xs font-bold text-stone-400 uppercase mb-1">Reapplied Program</label>
-                  <input
+                  <select
                     className="w-full p-3 bg-white border border-stone-200 rounded-xl text-sm"
                     value={formData.reappliedProgram}
                     onChange={e => setFormData({...formData, reappliedProgram: e.target.value})}
-                  />
+                  >
+                    <option value="">Select Program</option>
+                    <option value="HCO">HCO</option>
+                    <option value="SHCO">SHCO</option>
+                    <option value="ECO">ECO</option>
+                    <option value="ELCP">ELCP</option>
+                  </select>
                 </div>
                 <div>
                   <label className="block text-xs font-bold text-stone-400 uppercase mb-1">Renewal App No</label>

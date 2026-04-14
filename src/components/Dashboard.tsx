@@ -211,6 +211,23 @@ export function Dashboard({ hospitals, interactions, applications, users }: Dash
     { name: 'Not Renewed', value: filteredHospitals.filter(h => !h.reapplied).length },
   ], [filteredHospitals]);
 
+  const programMigrationData = useMemo(() => {
+    const counts: Record<string, number> = {
+      'HCO': 0,
+      'SHCO': 0,
+      'ECO': 0,
+      'ELCP': 0
+    };
+    filteredHospitals.forEach(h => {
+      if (h.reapplied && h.reappliedProgram) {
+        counts[h.reappliedProgram] = (counts[h.reappliedProgram] || 0) + 1;
+      }
+    });
+    return Object.entries(counts)
+      .map(([name, value]) => ({ name, value }))
+      .filter(item => item.value > 0);
+  }, [filteredHospitals]);
+
   const notRenewedBreakdown = useMemo(() => {
     const notRenewedHospitals = filteredHospitals.filter(h => !h.reapplied);
     const hospitalIds = new Set(notRenewedHospitals.map(h => h.id));
@@ -657,6 +674,38 @@ export function Dashboard({ hospitals, interactions, applications, users }: Dash
                 <Legend />
               </PieChart>
             </ResponsiveContainer>
+          </div>
+        </div>
+
+        {/* Program Migration */}
+        <div className="bg-white p-8 rounded-3xl border border-stone-200 shadow-sm">
+          <h3 className="text-lg font-serif font-bold text-stone-900 mb-6">Program Migration</h3>
+          <div className="h-64">
+            {programMigrationData.length > 0 ? (
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie
+                    data={programMigrationData}
+                    cx="50%"
+                    cy="50%"
+                    innerRadius={60}
+                    outerRadius={80}
+                    paddingAngle={5}
+                    dataKey="value"
+                  >
+                    {programMigrationData.map((entry, index) => (
+                      <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                    ))}
+                  </Pie>
+                  <Tooltip />
+                  <Legend />
+                </PieChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="h-full flex items-center justify-center text-stone-400 italic text-sm">
+                No migration data yet
+              </div>
+            )}
           </div>
         </div>
 

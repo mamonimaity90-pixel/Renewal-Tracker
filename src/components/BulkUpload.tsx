@@ -1,7 +1,7 @@
 import React, { useState, useRef } from 'react';
 import Papa from 'papaparse';
 import { db, auth } from '../firebase';
-import { collection, addDoc, updateDoc, doc } from 'firebase/firestore';
+import { collection, addDoc, updateDoc, doc, writeBatch } from 'firebase/firestore';
 import { Upload, X, CheckCircle2, AlertCircle, Loader2 } from 'lucide-react';
 import { format, parse } from 'date-fns';
 import { Hospital, User } from '../types';
@@ -25,25 +25,38 @@ export function BulkUpload({ onClose, users, existingHospitals }: BulkUploadProp
   };
 
   const parseDate = (dateStr: any) => {
-    if (!dateStr || dateStr === 'N/A' || dateStr === '-' || typeof dateStr !== 'string') return null;
-    const trimmed = dateStr.trim();
+    if (!dateStr || dateStr === 'N/A' || dateStr === '-' || dateStr === 'null') return null;
+    const trimmed = String(dateStr).trim();
     if (!trimmed) return null;
 
     // Try common formats with date-fns
     const formats = [
       'dd-MM-yyyy', 'yyyy-MM-dd', 'MM/dd/yyyy', 'dd/MM/yyyy', 
       'd/M/yyyy', 'd-M-yyyy', 'dd-MMM-yyyy', 'dd-MMM-yy',
-      'd/M/yy', 'M/d/yy', 'dd.MM.yyyy', 'MMM d, yyyy', 'MMMM d, yyyy'
+      'd/M/yy', 'M/d/yy', 'dd.MM.yyyy', 'MMM d, yyyy', 'MMMM d, yyyy',
+      'dd-MM-yy', 'MM-dd-yyyy', 'yyyy/MM/dd', 'dd.MM.yy', 'd.M.yy', 'd.M.yyyy',
+      'dd/MMM/yyyy', 'dd/MMM/yy', 'dd-MMM-yyyy', 'MMM-yy', 'MMM-yyyy',
+      'dd.MMM.yyyy', 'dd.MMM.yy', 'd.MMM.yy', 'd.MMM.yyyy'
     ];
     
     for (const f of formats) {
       try {
         const parsed = parse(trimmed, f, new Date());
-        if (!isNaN(parsed.getTime())) {
+        if (!isNaN(parsed.getTime()) && parsed.getFullYear() > 1900) {
           return parsed.toISOString();
         }
       } catch (e) {
         continue;
+      }
+    }
+
+    // Try parsing as number (Excel serial date)
+    const num = Number(trimmed);
+    if (!isNaN(num) && num > 30000 && num < 60000) {
+      // Excel dates start from Dec 30, 1899
+      const excelDate = new Date((num - 25569) * 86400 * 1000);
+      if (!isNaN(excelDate.getTime())) {
+        return excelDate.toISOString();
       }
     }
 
@@ -56,6 +69,51 @@ export function BulkUpload({ onClose, users, existingHospitals }: BulkUploadProp
     return null;
   };
 
+  const getCellValue = (row: any, aliases: string[]) => {
+    const keys = Object.keys(row);
+    // First try exact match (normalized)
+    for (const alias of aliases) {
+      const normalizedAlias = alias.toLowerCase().replace(/[^a-z0-9]/g, '');
+      const key = keys.find(k => k.toLowerCase().replace(/[^a-z0-9]/g, '') === normalizedAlias);
+      if (key && row[key] !== undefined && row[key] !== null && row[key] !== '') {
+        return row[key];
+      }
+    }
+    // Then try partial match (if the header contains the alias)
+    for (const alias of aliases) {
+      const normalizedAlias = alias.toLowerCase().replace(/[^a-z0-9]/g, '');
+      if (normalizedAlias.length < 3) continue; // Skip very short aliases for partial matching
+      const key = keys.find(k => k.toLowerCase().replace(/[^a-z0-9]/g, '').includes(normalizedAlias));
+      if (key && row[key] !== undefined && row[key] !== null && row[key] !== '') {
+        return row[key];
+      }
+    }
+    return null;
+  };
+
+  const handleFirestoreError = (error: any, operationType: string, path: string | null) => {
+    const errInfo = {
+      error: error instanceof Error ? error.message : String(error),
+      authInfo: {
+        userId: auth.currentUser?.uid,
+        email: auth.currentUser?.email,
+        emailVerified: auth.currentUser?.emailVerified,
+        isAnonymous: auth.currentUser?.isAnonymous,
+        tenantId: auth.currentUser?.tenantId,
+        providerInfo: auth.currentUser?.providerData.map(provider => ({
+          providerId: provider.providerId,
+          displayName: provider.displayName,
+          email: provider.email,
+          photoUrl: provider.photoURL
+        })) || []
+      },
+      operationType,
+      path
+    };
+    console.error('Firestore Error: ', JSON.stringify(errInfo));
+    throw new Error(JSON.stringify(errInfo));
+  };
+
   const handleUpload = async () => {
     if (!file) return;
 
@@ -65,112 +123,160 @@ export function BulkUpload({ onClose, users, existingHospitals }: BulkUploadProp
     Papa.parse(file, {
       header: true,
       skipEmptyLines: true,
-      transformHeader: (header) => header.trim(), // Trim headers to handle extra spaces
+      transformHeader: (header) => header.trim().replace(/\s+/g, ' '), // Normalize spaces in headers
       complete: async (results) => {
         let successCount = 0;
         let updatedCount = 0;
         let failedCount = 0;
         const errors: string[] = [];
 
-        for (const row of results.data as any[]) {
-          try {
-            const hospitalName = row['Hospital Name'] || row['name'] || row['Hospital'];
-            const appNo = row['Application No'] || row['applicationNo'] || row['App No'];
+        // Create lookup maps for O(1) performance
+        const hospitalByAppNo = new Map(existingHospitals.filter(h => h.applicationNo).map(h => [h.applicationNo, h]));
+        const hospitalByName = new Map(existingHospitals.map(h => [h.name.toLowerCase().trim(), h]));
+        const userByName = new Map(users.map(u => [u.name.toLowerCase().trim(), u]));
 
-            if (!hospitalName && !appNo) {
-              throw new Error('Missing Hospital Name or Application Number');
-            }
+        // Process in batches of 100 for better performance and to stay within limits
+        const BATCH_SIZE = 100;
+        const rows = results.data as any[];
+        
+        for (let i = 0; i < rows.length; i += BATCH_SIZE) {
+          const chunk = rows.slice(i, i + BATCH_SIZE);
+          const batch = writeBatch(db);
+          const hospitalsRef = collection(db, 'hospitals');
+          const interactionsRef = collection(db, 'interactions');
 
-            // Find existing hospital primarily by Application Number, fallback to Name
-            let existing = null;
-            if (appNo) {
-              existing = existingHospitals.find(h => h.applicationNo === appNo.trim());
-            }
-            
-            if (!existing && hospitalName) {
-              existing = existingHospitals.find(h => h.name.toLowerCase() === hospitalName.trim().toLowerCase());
-            }
+          for (const row of chunk) {
+            try {
+              const hospitalName = getCellValue(row, ['Hospital Name', 'name', 'Hospital', 'Facility Name', 'Org Name', 'Name of Hospital', 'HospitalName']);
+              const appNo = getCellValue(row, ['Application No', 'applicationNo', 'App No', 'Application Number', 'ID', 'App. No.', 'Application No.', 'Ref No']);
 
-            // Map Team Member Name to UID
-            const teamMemberName = row['Team Member'] || row['Assigned To'] || row['assignedTo'] || row['Team Member Name'];
-            let assignedToUid = existing?.assignedTo || '';
-            if (teamMemberName) {
-              const matchedUser = users.find(u => u.name.toLowerCase() === teamMemberName.trim().toLowerCase());
-              if (matchedUser) {
-                assignedToUid = matchedUser.uid;
+              if (!hospitalName && !appNo) {
+                throw new Error('Missing Hospital Name or Application Number');
               }
-            }
 
-            // Robust Date Extraction
-            const rawExpiryDate = row['Cert Expiry Date'] || row['Expiry Date'] || row['expiryDate'] || row['Expiry'];
-            let parsedExpiry = parseDate(rawExpiryDate);
-            
-            // If a date was provided in the CSV but we couldn't parse it, that's an error
-            if (rawExpiryDate && !parsedExpiry && rawExpiryDate !== 'N/A' && rawExpiryDate !== '-') {
-              throw new Error(`Could not parse Expiry Date: "${rawExpiryDate}". Please use DD-MM-YYYY or YYYY-MM-DD.`);
-            }
-
-            // If no date in CSV and no existing date, then error
-            if (!parsedExpiry && !existing?.expiryDate) {
-              throw new Error(`Missing Expiry Date for "${hospitalName}"`);
-            }
-
-            const hospitalData: any = {
-              name: hospitalName.trim(),
-              applicationNo: row['Application No'] || row['applicationNo'] || row['App No'] || existing?.applicationNo || '',
-              state: row['State'] || row['state'] || existing?.state || '',
-              district: row['District'] || row['district'] || existing?.district || '',
-              pincode: row['Pincode'] || row['pincode'] || existing?.pincode || '',
-              beds: parseInt(row['Bed Strength'] || row['beds'] || row['Beds'] || existing?.beds?.toString() || '0'),
-              expiryDate: parsedExpiry || existing?.expiryDate,
-              contactPerson: row['Contact Person'] || row['contactPerson'] || row['Contact'] || existing?.contactPerson || '',
-              contactNumber: row['Contact Number'] || row['contactNumber'] || row['Phone'] || row['Mobile'] || existing?.contactNumber || '',
-              reapplied: (row['Reapplied Y/N'] || row['reapplied'] || row['Reapplied'] || '').toString().toLowerCase().startsWith('y') || row['reapplied'] === true || (existing?.reapplied ?? false),
-              reappliedProgram: row['If reapplied yes, Program under which reapplied'] || row['reappliedProgram'] || row['Program'] || existing?.reappliedProgram || '',
-              renewalApplicationNo: row['Renewal Application No'] || row['renewalApplicationNo'] || row['Renewal App No'] || existing?.renewalApplicationNo || '',
-              renewalApplicationDate: parseDate(row['Renewal App Date'] || row['renewalApplicationDate'] || row['Renewal Date']) || existing?.renewalApplicationDate || '',
-              status: row['Status'] || existing?.status || 'Active',
-              currentProgram: row['Program'] || row['currentProgram'] || existing?.currentProgram || '',
-              assignedTo: assignedToUid
-            };
-
-            let hospitalId = '';
-            if (existing) {
-              await updateDoc(doc(db, 'hospitals', existing.id), hospitalData);
-              hospitalId = existing.id;
-              updatedCount++;
-            } else {
-              const docRef = await addDoc(collection(db, 'hospitals'), hospitalData);
-              hospitalId = docRef.id;
-              successCount++;
-            }
-
-            // Handle Interaction Logging from CSV
-            const callStatus = row['Call Status'] || row['Call Connected'] || row['Disposition'];
-            if (callStatus) {
-              const isConnected = callStatus.toLowerCase().includes('connected') && !callStatus.toLowerCase().includes('not');
-              const result = isConnected ? 'Connected' : 'Not Connected';
+              // Find existing hospital primarily by Application Number, fallback to Name
+              let existing = null;
+              if (appNo) {
+                existing = hospitalByAppNo.get(String(appNo).trim());
+              }
               
-              const interactionData: any = {
-                hospitalId,
-                userId: auth.currentUser?.uid || assignedToUid || 'system',
-                timestamp: new Date().toISOString(),
-                type: 'Call',
-                result
-              };
+              if (!existing && hospitalName) {
+                existing = hospitalByName.get(String(hospitalName).toLowerCase().trim());
+              }
 
-              if (isConnected) {
-                const reason = row['Remarks'] || row['Reason'] || row['Reason Classification'];
-                if (reason) {
-                  interactionData.reason = reason;
+              // Map Team Member Name to UID
+              const teamMemberName = getCellValue(row, ['Team Member', 'Assigned To', 'assignedTo', 'Team Member Name', 'Owner', 'User', 'Assigned Member']);
+              let assignedToUid = existing?.assignedTo || '';
+              if (teamMemberName) {
+                const matchedUser = userByName.get(String(teamMemberName).toLowerCase().trim());
+                if (matchedUser) {
+                  assignedToUid = matchedUser.uid;
                 }
               }
 
-              await addDoc(collection(db, 'interactions'), interactionData);
+              // Robust Date Extraction
+              const rawExpiryDate = getCellValue(row, [
+                'Cert Expiry Date', 
+                'Expiry Date', 
+                'expiryDate', 
+                'Expiry', 
+                'Valid Until', 
+                'End Date', 
+                'Certificate Expiry', 
+                'Validity', 
+                'Valid Upto', 
+                'Valid To', 
+                'Expiry Date (DD-MM-YYYY)',
+                'Expiry Date (DD/MM/YYYY)',
+                'Date of Expiry',
+                'ExpiryDate',
+                'Cert. Expiry Date',
+                'Cert. Expiry',
+                'Valid From',
+                'Valid Thru',
+                'Validity Date',
+                'Cert Expiry Date (Supports formats like DD-MM-YYYY, YYYY-MM-DD, etc.)'
+              ]);
+              let parsedExpiry = parseDate(rawExpiryDate);
+              
+              if (rawExpiryDate && !parsedExpiry && !['N/A', '-', 'null'].includes(String(rawExpiryDate).toLowerCase())) {
+                throw new Error(`Could not parse Expiry Date: "${rawExpiryDate}"`);
+              }
+
+              if (!parsedExpiry && !existing?.expiryDate) {
+                throw new Error(`Missing Expiry Date for "${hospitalName || appNo}"`);
+              }
+
+              const hospitalData: any = {
+                name: (hospitalName || existing?.name || appNo).trim(),
+                applicationNo: (appNo || existing?.applicationNo || '').toString().trim(),
+                state: getCellValue(row, ['State', 'Province', 'Region', 'State Name']) || existing?.state || '',
+                district: getCellValue(row, ['District', 'City', 'County', 'District Name']) || existing?.district || '',
+                pincode: getCellValue(row, ['Pincode', 'Zip', 'Zipcode', 'Postal Code', 'Pin Code', 'Pin']) || existing?.pincode || '',
+                beds: parseInt(getCellValue(row, ['Bed Strength', 'beds', 'Beds', 'Capacity', 'No of Beds', 'Bed Count']) || existing?.beds?.toString() || '0'),
+                expiryDate: parsedExpiry || existing?.expiryDate,
+                contactPerson: getCellValue(row, ['Contact Person', 'contactPerson', 'Contact', 'SPOC', 'Admin Name', 'Contact Name', 'Person Name']) || existing?.contactPerson || '',
+                contactNumber: getCellValue(row, ['Contact Number', 'contactNumber', 'Phone', 'Mobile', 'SPOC Phone', 'SPOC Number', 'Contact No', 'Phone Number', 'Mobile Number']) || existing?.contactNumber || '',
+                reapplied: String(getCellValue(row, ['Reapplied Y/N', 'reapplied', 'Reapplied', 'Is Reapplied']) || '').toLowerCase().startsWith('y') || getCellValue(row, ['reapplied']) === true || (existing?.reapplied ?? false),
+                reappliedProgram: getCellValue(row, ['If reapplied yes, Program under which reapplied', 'reappliedProgram', 'Program', 'New Program', 'Reapplied Program']) || existing?.reappliedProgram || '',
+                renewalApplicationNo: getCellValue(row, ['Renewal Application No', 'renewalApplicationNo', 'Renewal App No', 'Renewal ID']) || existing?.renewalApplicationNo || '',
+                renewalApplicationDate: parseDate(getCellValue(row, ['Renewal App Date', 'renewalApplicationDate', 'Renewal Date', 'Renewal Application Date'])) || existing?.renewalApplicationDate || '',
+                status: getCellValue(row, ['Status', 'Active', 'Current Status']) || existing?.status || 'Active',
+                currentProgram: getCellValue(row, ['Program', 'currentProgram', 'Accreditation', 'Current Program']) || existing?.currentProgram || '',
+                assignedTo: assignedToUid
+              };
+
+              let hospitalId = '';
+              if (existing) {
+                const hRef = doc(db, 'hospitals', existing.id);
+                batch.update(hRef, hospitalData);
+                hospitalId = existing.id;
+                updatedCount++;
+              } else {
+                const hRef = doc(hospitalsRef);
+                batch.set(hRef, hospitalData);
+                hospitalId = hRef.id;
+                successCount++;
+              }
+
+              // Handle Interaction Logging from CSV
+              const callStatus = getCellValue(row, ['Call Status', 'Call Connected', 'Disposition', 'Call Result']);
+              if (callStatus) {
+                const isConnected = String(callStatus).toLowerCase().includes('connected') && !String(callStatus).toLowerCase().includes('not');
+                const result = isConnected ? 'Connected' : 'Not Connected';
+                
+                const interactionData: any = {
+                  hospitalId,
+                  userId: auth.currentUser?.uid || assignedToUid || 'system',
+                  timestamp: new Date().toISOString(),
+                  type: 'Call',
+                  result
+                };
+
+                const reason = getCellValue(row, ['Remarks', 'Reason', 'Reason Classification', 'Comments', 'Notes']);
+                if (reason) {
+                  interactionData.reason = reason;
+                }
+
+                const iRef = doc(interactionsRef);
+                batch.set(iRef, interactionData);
+              }
+            } catch (err: any) {
+              failedCount++;
+              errors.push(`Row ${i + chunk.indexOf(row) + 1}: ${err.message}`);
             }
-          } catch (err: any) {
-            failedCount++;
-            errors.push(`Row ${successCount + updatedCount + failedCount}: ${err.message}`);
+          }
+
+          // Commit the batch
+          try {
+            await batch.commit();
+          } catch (batchErr: any) {
+            console.error('Batch commit failed:', batchErr);
+            try {
+              handleFirestoreError(batchErr, 'write', 'hospitals/batch');
+            } catch (jsonErr: any) {
+              errors.push(`Batch starting at row ${i + 1} failed: ${jsonErr.message}`);
+            }
           }
         }
 

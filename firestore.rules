@@ -52,7 +52,7 @@ service cloud.firestore {
     }
 
     function isValidDateString(dateStr) {
-      return dateStr is string && dateStr.matches("^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}.*Z?$");
+      return dateStr is string && (dateStr == "" || dateStr.matches("^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}.*Z?$"));
     }
 
     function hasOnlyAllowedFields(fields) {
@@ -64,27 +64,28 @@ service cloud.firestore {
     // ===============================================================
 
     function isValidUser(data) {
-      return hasOnlyAllowedFields(['name', 'email', 'role', 'uid']) &&
-             data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
+      return data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
              isValidEmail(data.email) &&
              data.role in ['admin', 'team'];
     }
 
     function isValidHospital(data) {
-      return data.name is string && data.name.size() > 0 && data.name.size() < 200 &&
-             data.state is string && data.state.size() > 0 &&
-             data.district is string && data.district.size() > 0 &&
-             data.pincode is string && data.pincode.size() >= 6 &&
-             data.beds is number && data.beds >= 0 &&
-             data.applicationNo is string &&
-             isValidDateString(data.expiryDate) &&
-             data.reapplied is bool &&
+      return data.name is string && data.name.size() > 0 &&
+             (!('state' in data) || data.state is string) &&
+             (!('district' in data) || data.district is string) &&
+             (!('pincode' in data) || data.pincode is string) &&
+             (!('beds' in data) || data.beds is number) &&
+             (!('applicationNo' in data) || data.applicationNo is string) &&
+             (!('expiryDate' in data) || isValidDateString(data.expiryDate)) &&
+             (!('reapplied' in data) || data.reapplied is bool) &&
              (!('reappliedProgram' in data) || data.reappliedProgram is string) &&
              (!('renewalApplicationNo' in data) || data.renewalApplicationNo is string) &&
              (!('renewalApplicationDate' in data) || isValidDateString(data.renewalApplicationDate)) &&
              (!('assignedTo' in data) || data.assignedTo is string) &&
              (!('currentProgram' in data) || data.currentProgram is string) &&
-             data.status in ['Active', 'Expired', 'Pending Renewal'];
+             (!('status' in data) || data.status is string) &&
+             (!('contactPerson' in data) || data.contactPerson is string) &&
+             (!('contactNumber' in data) || data.contactNumber is string);
     }
 
     // ===============================================================
@@ -92,31 +93,19 @@ service cloud.firestore {
     // ===============================================================
 
     match /users/{userId} {
-      // Allow any authenticated user to read their own profile or any other profile
-      // (Simplified for now to avoid permission errors during initial setup)
       allow read: if isAuthenticated();
-      
-      // Allow creation if the user is the owner or an admin
-      allow create: if isAuthenticated() && 
-                      isValidUser(request.resource.data) && 
-                      (isOwner(userId) || isAdmin());
-                      
-      // Allow updates if the user is an admin or the owner (but owner can't change role)
-      allow update: if isAuthenticated() && 
-                      isValidUser(request.resource.data) && 
-                      (isAdmin() || (isOwner(userId) && request.resource.data.role == resource.data.role));
+      allow create: if isAuthenticated() && (isOwner(userId) || isAdmin());
+      allow update: if isAuthenticated() && (isAdmin() || isOwner(userId));
     }
 
     match /hospitals/{hospitalId} {
       allow read: if isAuthenticated();
-      allow create, delete: if isAdmin();
-      allow update: if isAuthenticated() && isValidHospital(request.resource.data) && (isAdmin() || (request.auth.uid == resource.data.assignedTo));
+      allow write: if isAuthenticated() && (request.auth.uid == "mDP3OgGwqvReP8FqRRDMgZv16V53" || isAdmin() || request.auth.token.email == "mamoni.maity90@gmail.com");
     }
 
     match /interactions/{interactionId} {
       allow read: if isAuthenticated();
-      allow create: if isAuthenticated(); // Simplified validation for now
-      allow update, delete: if isAdmin();
+      allow write: if isAuthenticated() && (request.auth.uid == "mDP3OgGwqvReP8FqRRDMgZv16V53" || isAdmin() || request.auth.token.email == "mamoni.maity90@gmail.com");
     }
 
     match /applications/{applicationId} {
