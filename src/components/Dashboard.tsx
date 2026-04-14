@@ -11,7 +11,8 @@ import {
   PieChart,
   Pie,
   Cell,
-  Legend
+  Legend,
+  LabelList
 } from 'recharts';
 import { FileText, AlertCircle, CheckCircle2, Clock, TrendingUp, Filter, Search, X, ArrowUpDown, ChevronDown } from 'lucide-react';
 import { format, isAfter, isBefore, parseISO, differenceInDays, differenceInMonths } from 'date-fns';
@@ -134,8 +135,8 @@ export function Dashboard({ hospitals, interactions, applications, users }: Dash
       }
     } else {
       const currentYear = new Date().getFullYear();
-      for (let i = 4; i >= 0; i--) {
-        timeLabels.push((currentYear - i).toString());
+      for (let year = 2023; year <= currentYear; year++) {
+        timeLabels.push(year.toString());
       }
     }
 
@@ -182,19 +183,7 @@ export function Dashboard({ hospitals, interactions, applications, users }: Dash
       });
 
       const total = monthHospitals.length;
-      if (trendView === 'percent' && total > 0) {
-        return {
-          label,
-          'Pre-6M': Number(((counts.pre6m / total) * 100).toFixed(1)),
-          'Pre-0-6M': Number(((counts.pre0to6m / total) * 100).toFixed(1)),
-          'Post-0-6M': Number(((counts.post0to6m / total) * 100).toFixed(1)),
-          'Post-6-12M': Number(((counts.post6to12m / total) * 100).toFixed(1)),
-          'Post-1-2Y': Number(((counts.post1to2y / total) * 100).toFixed(1)),
-          'Pending': Number(((counts.pending / total) * 100).toFixed(1)),
-        };
-      }
-
-      return {
+      const dataPoint: any = {
         label,
         'Pre-6M': counts.pre6m,
         'Pre-0-6M': counts.pre0to6m,
@@ -202,7 +191,19 @@ export function Dashboard({ hospitals, interactions, applications, users }: Dash
         'Post-6-12M': counts.post6to12m,
         'Post-1-2Y': counts.post1to2y,
         'Pending': counts.pending,
+        total: total
       };
+
+      if (trendView === 'percent' && total > 0) {
+        dataPoint['Pre-6M'] = Number(((counts.pre6m / total) * 100).toFixed(1));
+        dataPoint['Pre-0-6M'] = Number(((counts.pre0to6m / total) * 100).toFixed(1));
+        dataPoint['Post-0-6M'] = Number(((counts.post0to6m / total) * 100).toFixed(1));
+        dataPoint['Post-6-12M'] = Number(((counts.post6to12m / total) * 100).toFixed(1));
+        dataPoint['Post-1-2Y'] = Number(((counts.post1to2y / total) * 100).toFixed(1));
+        dataPoint['Pending'] = Number(((counts.pending / total) * 100).toFixed(1));
+      }
+
+      return dataPoint;
     });
   }, [filteredHospitals, trendGranularity, trendView]);
 
@@ -267,6 +268,37 @@ export function Dashboard({ hospitals, interactions, applications, users }: Dash
   const RENEWAL_COLORS = ['#10b981', '#f43f5e'];
   const BREAKDOWN_COLORS = ['#3b82f6', '#f97316', '#d6d3d1'];
 
+  const renderCustomBarLabel = (props: any) => {
+    const { x, y, width, height, value } = props;
+    if (height < 20 || !value) return null;
+    
+    let displayValue = '';
+    if (trendView === 'percent') {
+      displayValue = `${Math.round(value)}%`;
+    } else {
+      const total = props.payload?.total;
+      if (total && total > 0) {
+        displayValue = `${Math.round((value / total) * 100)}%`;
+      }
+    }
+    
+    if (!displayValue || displayValue === '0%') return null;
+
+    return (
+      <text 
+        x={x + width / 2} 
+        y={y + height / 2} 
+        fill="#fff" 
+        textAnchor="middle" 
+        dominantBaseline="middle" 
+        fontSize={9} 
+        fontWeight="bold"
+      >
+        {displayValue}
+      </text>
+    );
+  };
+
   return (
     <div className="space-y-8">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
@@ -286,7 +318,7 @@ export function Dashboard({ hospitals, interactions, applications, users }: Dash
             }}
             className="flex items-center gap-2 px-4 py-2 bg-stone-900 text-white rounded-xl text-sm font-bold hover:bg-stone-800 transition-colors shadow-sm"
           >
-            <FileText className="w-4 h-4" /> Download PDF
+            <FileText className="w-4 h-4" /> Download Dashboard Summary
           </button>
           {(filterUser || filterState || filterDateStart || filterDateEnd) && (
             <button 
@@ -370,6 +402,196 @@ export function Dashboard({ hospitals, interactions, applications, users }: Dash
             <p className="text-3xl font-serif font-bold text-stone-900 mt-1">{stat.value}</p>
           </div>
         ))}
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+        {/* Renewal Status */}
+        <div className="bg-white p-8 rounded-3xl border border-stone-200 shadow-sm">
+          <h3 className="text-lg font-serif font-bold text-stone-900 mb-6">Renewal Status</h3>
+          <div className="h-64">
+            <ResponsiveContainer width="100%" height="100%">
+              <PieChart>
+                <Pie
+                  data={renewalData}
+                  cx="50%"
+                  cy="50%"
+                  innerRadius={60}
+                  outerRadius={80}
+                  paddingAngle={5}
+                  dataKey="value"
+                  label={({ percent }) => `${(percent * 100).toFixed(0)}%`}
+                >
+                  {renewalData.map((entry, index) => (
+                    <Cell key={`cell-${index}`} fill={RENEWAL_COLORS[index % RENEWAL_COLORS.length]} />
+                  ))}
+                </Pie>
+                <Tooltip formatter={(value: any) => [value, 'Count']} />
+                <Legend />
+              </PieChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+
+        {/* Program Migration */}
+        <div className="bg-white p-8 rounded-3xl border border-stone-200 shadow-sm">
+          <h3 className="text-lg font-serif font-bold text-stone-900 mb-6">Program Migration</h3>
+          <div className="h-64">
+            {programMigrationData.length > 0 ? (
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie
+                    data={programMigrationData}
+                    cx="50%"
+                    cy="50%"
+                    innerRadius={60}
+                    outerRadius={80}
+                    paddingAngle={5}
+                    dataKey="value"
+                    label={({ percent }) => `${(percent * 100).toFixed(0)}%`}
+                  >
+                    {programMigrationData.map((entry, index) => (
+                      <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                    ))}
+                  </Pie>
+                  <Tooltip formatter={(value: any) => [value, 'Count']} />
+                  <Legend />
+                </PieChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="h-full flex items-center justify-center text-stone-400 italic text-sm">
+                No migration data yet
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Month-on-Month Trend */}
+      <div className="bg-white p-8 rounded-3xl border border-stone-200 shadow-sm">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
+          <div>
+            <h3 className="text-lg font-serif font-bold text-stone-900">Renewal Performance Trend</h3>
+            <p className="text-xs text-stone-500">Analysis of reapplication timing relative to expiry</p>
+          </div>
+          
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="flex bg-stone-100 p-1 rounded-xl">
+              <button 
+                onClick={() => setTrendGranularity('month')}
+                className={cn(
+                  "px-3 py-1.5 text-[10px] font-bold rounded-lg transition-all",
+                  trendGranularity === 'month' ? "bg-white text-stone-900 shadow-sm" : "text-stone-500 hover:text-stone-700"
+                )}
+              >
+                Monthly
+              </button>
+              <button 
+                onClick={() => setTrendGranularity('year')}
+                className={cn(
+                  "px-3 py-1.5 text-[10px] font-bold rounded-lg transition-all",
+                  trendGranularity === 'year' ? "bg-white text-stone-900 shadow-sm" : "text-stone-500 hover:text-stone-700"
+                )}
+              >
+                Yearly
+              </button>
+            </div>
+
+            <div className="flex bg-stone-100 p-1 rounded-xl">
+              <button 
+                onClick={() => setTrendView('count')}
+                className={cn(
+                  "px-3 py-1.5 text-[10px] font-bold rounded-lg transition-all",
+                  trendView === 'count' ? "bg-white text-stone-900 shadow-sm" : "text-stone-500 hover:text-stone-700"
+                )}
+              >
+                Count
+              </button>
+              <button 
+                onClick={() => setTrendView('percent')}
+                className={cn(
+                  "px-3 py-1.5 text-[10px] font-bold rounded-lg transition-all",
+                  trendView === 'percent' ? "bg-white text-stone-900 shadow-sm" : "text-stone-500 hover:text-stone-700"
+                )}
+              >
+                Percentage
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-8">
+          {[
+            { label: 'Pre-6M', color: 'bg-emerald-600', desc: '> 6m before' },
+            { label: 'Pre-0-6M', color: 'bg-emerald-400', desc: '0-6m before' },
+            { label: 'Post-0-6M', color: 'bg-amber-400', desc: '0-6m after' },
+            { label: 'Post-6-12M', color: 'bg-orange-500', desc: '6-12m after' },
+            { label: 'Post-1-2Y', color: 'bg-red-500', desc: '1-2y after' },
+            { label: 'Pending', color: 'bg-stone-300', desc: 'Not renewed' },
+          ].map((item, i) => (
+            <div key={i} className="flex flex-col gap-1">
+              <div className="flex items-center gap-1.5">
+                <div className={cn("w-2.5 h-2.5 rounded-full", item.color)} />
+                <span className="text-[10px] font-bold text-stone-900 uppercase tracking-wider">{item.label}</span>
+              </div>
+              <span className="text-[9px] text-stone-400 pl-4">{item.desc}</span>
+            </div>
+          ))}
+        </div>
+
+        <div className="h-96">
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart data={trendData} margin={{ top: 20, right: 10, left: -20, bottom: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f5f5f4" />
+              <XAxis 
+                dataKey="label" 
+                axisLine={false} 
+                tickLine={false} 
+                fontSize={10} 
+                tick={{ fill: '#78716c' }}
+                dy={10}
+              />
+              <YAxis 
+                axisLine={false} 
+                tickLine={false} 
+                fontSize={10} 
+                tick={{ fill: '#78716c' }}
+                label={trendView === 'percent' ? { value: '%', angle: -90, position: 'insideLeft', offset: 10, fontSize: 10 } : undefined}
+              />
+              <Tooltip 
+                cursor={{ fill: '#fafaf9' }}
+                contentStyle={{ 
+                  borderRadius: '16px', 
+                  border: '1px solid #e7e5e4',
+                  boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)',
+                  fontSize: '12px'
+                }}
+                formatter={(value: any, name: string) => {
+                  if (name === 'total') return null;
+                  return trendView === 'percent' ? `${value}%` : value;
+                }}
+              />
+              <Bar dataKey="Pre-6M" stackId="a" fill="#059669" barSize={40}>
+                <LabelList content={renderCustomBarLabel} />
+              </Bar>
+              <Bar dataKey="Pre-0-6M" stackId="a" fill="#34d399" barSize={40}>
+                <LabelList content={renderCustomBarLabel} />
+              </Bar>
+              <Bar dataKey="Post-0-6M" stackId="a" fill="#fbbf24" barSize={40}>
+                <LabelList content={renderCustomBarLabel} />
+              </Bar>
+              <Bar dataKey="Post-6-12M" stackId="a" fill="#f97316" barSize={40}>
+                <LabelList content={renderCustomBarLabel} />
+              </Bar>
+              <Bar dataKey="Post-1-2Y" stackId="a" fill="#ef4444" barSize={40}>
+                <LabelList content={renderCustomBarLabel} />
+              </Bar>
+              <Bar dataKey="Pending" stackId="a" fill="#d6d3d1" radius={[4, 4, 0, 0]} barSize={40}>
+                <LabelList content={renderCustomBarLabel} />
+                <LabelList dataKey="total" position="top" fontSize={10} fill="#78716c" offset={10} />
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
       </div>
 
       {/* Geographic Performance Table */}
@@ -538,177 +760,7 @@ export function Dashboard({ hospitals, interactions, applications, users }: Dash
         </div>
       </div>
 
-      {/* Month-on-Month Trend */}
-      <div className="bg-white p-8 rounded-3xl border border-stone-200 shadow-sm">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
-          <div>
-            <h3 className="text-lg font-serif font-bold text-stone-900">Renewal Performance Trend</h3>
-            <p className="text-xs text-stone-500">Analysis of reapplication timing relative to expiry</p>
-          </div>
-          
-          <div className="flex flex-wrap items-center gap-3">
-            <div className="flex bg-stone-100 p-1 rounded-xl">
-              <button 
-                onClick={() => setTrendGranularity('month')}
-                className={cn(
-                  "px-3 py-1.5 text-[10px] font-bold rounded-lg transition-all",
-                  trendGranularity === 'month' ? "bg-white text-stone-900 shadow-sm" : "text-stone-500 hover:text-stone-700"
-                )}
-              >
-                Monthly
-              </button>
-              <button 
-                onClick={() => setTrendGranularity('year')}
-                className={cn(
-                  "px-3 py-1.5 text-[10px] font-bold rounded-lg transition-all",
-                  trendGranularity === 'year' ? "bg-white text-stone-900 shadow-sm" : "text-stone-500 hover:text-stone-700"
-                )}
-              >
-                Yearly
-              </button>
-            </div>
-
-            <div className="flex bg-stone-100 p-1 rounded-xl">
-              <button 
-                onClick={() => setTrendView('count')}
-                className={cn(
-                  "px-3 py-1.5 text-[10px] font-bold rounded-lg transition-all",
-                  trendView === 'count' ? "bg-white text-stone-900 shadow-sm" : "text-stone-500 hover:text-stone-700"
-                )}
-              >
-                Count
-              </button>
-              <button 
-                onClick={() => setTrendView('percent')}
-                className={cn(
-                  "px-3 py-1.5 text-[10px] font-bold rounded-lg transition-all",
-                  trendView === 'percent' ? "bg-white text-stone-900 shadow-sm" : "text-stone-500 hover:text-stone-700"
-                )}
-              >
-                Percentage
-              </button>
-            </div>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-8">
-          {[
-            { label: 'Pre-6M', color: 'bg-emerald-600', desc: '> 6m before' },
-            { label: 'Pre-0-6M', color: 'bg-emerald-400', desc: '0-6m before' },
-            { label: 'Post-0-6M', color: 'bg-amber-400', desc: '0-6m after' },
-            { label: 'Post-6-12M', color: 'bg-orange-500', desc: '6-12m after' },
-            { label: 'Post-1-2Y', color: 'bg-red-500', desc: '1-2y after' },
-            { label: 'Pending', color: 'bg-stone-300', desc: 'Not renewed' },
-          ].map((item, i) => (
-            <div key={i} className="flex flex-col gap-1">
-              <div className="flex items-center gap-1.5">
-                <div className={cn("w-2.5 h-2.5 rounded-full", item.color)} />
-                <span className="text-[10px] font-bold text-stone-900 uppercase tracking-wider">{item.label}</span>
-              </div>
-              <span className="text-[9px] text-stone-400 pl-4">{item.desc}</span>
-            </div>
-          ))}
-        </div>
-
-        <div className="h-96">
-          <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={trendData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f5f5f4" />
-              <XAxis 
-                dataKey="label" 
-                axisLine={false} 
-                tickLine={false} 
-                fontSize={10} 
-                tick={{ fill: '#78716c' }}
-                dy={10}
-              />
-              <YAxis 
-                axisLine={false} 
-                tickLine={false} 
-                fontSize={10} 
-                tick={{ fill: '#78716c' }}
-                label={trendView === 'percent' ? { value: '%', angle: -90, position: 'insideLeft', offset: 10, fontSize: 10 } : undefined}
-              />
-              <Tooltip 
-                cursor={{ fill: '#fafaf9' }}
-                contentStyle={{ 
-                  borderRadius: '16px', 
-                  border: '1px solid #e7e5e4',
-                  boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)',
-                  fontSize: '12px'
-                }}
-                formatter={(value: any) => trendView === 'percent' ? `${value}%` : value}
-              />
-              <Bar dataKey="Pre-6M" stackId="a" fill="#059669" radius={trendView === 'percent' ? [0, 0, 0, 0] : [0, 0, 0, 0]} barSize={40} />
-              <Bar dataKey="Pre-0-6M" stackId="a" fill="#34d399" barSize={40} />
-              <Bar dataKey="Post-0-6M" stackId="a" fill="#fbbf24" barSize={40} />
-              <Bar dataKey="Post-6-12M" stackId="a" fill="#f97316" barSize={40} />
-              <Bar dataKey="Post-1-2Y" stackId="a" fill="#ef4444" barSize={40} />
-              <Bar dataKey="Pending" stackId="a" fill="#d6d3d1" radius={[4, 4, 0, 0]} barSize={40} />
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
-      </div>
-
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-        {/* Renewal Status */}
-        <div className="bg-white p-8 rounded-3xl border border-stone-200 shadow-sm">
-          <h3 className="text-lg font-serif font-bold text-stone-900 mb-6">Renewal Status</h3>
-          <div className="h-64">
-            <ResponsiveContainer width="100%" height="100%">
-              <PieChart>
-                <Pie
-                  data={renewalData}
-                  cx="50%"
-                  cy="50%"
-                  innerRadius={60}
-                  outerRadius={80}
-                  paddingAngle={5}
-                  dataKey="value"
-                >
-                  {renewalData.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={RENEWAL_COLORS[index % RENEWAL_COLORS.length]} />
-                  ))}
-                </Pie>
-                <Tooltip />
-                <Legend />
-              </PieChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
-
-        {/* Program Migration */}
-        <div className="bg-white p-8 rounded-3xl border border-stone-200 shadow-sm">
-          <h3 className="text-lg font-serif font-bold text-stone-900 mb-6">Program Migration</h3>
-          <div className="h-64">
-            {programMigrationData.length > 0 ? (
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie
-                    data={programMigrationData}
-                    cx="50%"
-                    cy="50%"
-                    innerRadius={60}
-                    outerRadius={80}
-                    paddingAngle={5}
-                    dataKey="value"
-                  >
-                    {programMigrationData.map((entry, index) => (
-                      <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                    ))}
-                  </Pie>
-                  <Tooltip />
-                  <Legend />
-                </PieChart>
-              </ResponsiveContainer>
-            ) : (
-              <div className="h-full flex items-center justify-center text-stone-400 italic text-sm">
-                No migration data yet
-              </div>
-            )}
-          </div>
-        </div>
-
         {/* Not Renewed Breakdown */}
         <div className="bg-white p-8 rounded-3xl border border-stone-200 shadow-sm">
           <h3 className="text-lg font-serif font-bold text-stone-900 mb-6">Not Renewed Breakdown</h3>
