@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useRef, useEffect } from 'react';
+import React, { useState, useMemo, useRef, useEffect, memo } from 'react';
 import { Hospital, User, Interaction } from '../types';
 import { 
   Search, 
@@ -38,7 +38,7 @@ interface HospitalListProps {
 
 const ITEMS_PER_PAGE = 50;
 
-export function HospitalList({ hospitals, users, interactions, isAdmin }: HospitalListProps) {
+export const HospitalList = memo(function HospitalList({ hospitals, users, interactions, isAdmin }: HospitalListProps) {
   const [search, setSearch] = useState('');
   const [sortField, setSortField] = useState<keyof Hospital>('expiryDate');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
@@ -649,7 +649,7 @@ export function HospitalList({ hospitals, users, interactions, isAdmin }: Hospit
       )}
     </div>
   );
-}
+});
 
 function MultiSelect({ options, selected, onChange, placeholder }: { 
   options: { label: string, value: string }[], 

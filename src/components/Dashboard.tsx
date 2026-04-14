@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, memo } from 'react';
 import { Hospital, Interaction, Application, User } from '../types';
 import { 
   BarChart, 
@@ -28,7 +28,7 @@ interface DashboardProps {
   users: User[];
 }
 
-export function Dashboard({ hospitals, interactions, applications, users }: DashboardProps) {
+export const Dashboard = memo(function Dashboard({ hospitals, interactions, applications, users }: DashboardProps) {
   const now = new Date();
   
   // Filter States
@@ -116,12 +116,14 @@ export function Dashboard({ hospitals, interactions, applications, users }: Dash
     }).length;
 
     // Retention Rate = Renewed / Expired
-    const renewedCount = expiredHospitals.filter(h => h.reapplied).length;
+    const renewedCount = filteredHospitals.filter(h => h.reapplied).length;
+    const pendingRenewals = filteredHospitals.filter(h => !h.reapplied).length;
+    const expiredRenewedCount = expiredHospitals.filter(h => h.reapplied).length;
     const retentionRate = expiredCount > 0 
-      ? Math.round((renewedCount / expiredCount) * 100) 
+      ? Math.round((expiredRenewedCount / expiredCount) * 100) 
       : 100; // 100% if no hospitals have reached expiry yet
 
-    return { total, expired: expiredCount, dueSoon, retentionRate };
+    return { total, expired: expiredCount, renewed: renewedCount, pendingRenewals, retentionRate };
   }, [filteredHospitals, now]);
 
   const trendData = useMemo(() => {
@@ -163,8 +165,10 @@ export function Dashboard({ hospitals, interactions, applications, users }: Dash
           return;
         }
 
+        // If reapplied but no date, we count it as renewed but can't determine timing
+        // We'll put it in Pre-0-6M as a default "on-time" bucket to avoid skewing Pending
         if (!h.renewalApplicationDate) {
-          counts.pending++;
+          counts.pre0to6m++;
           return;
         }
 
@@ -183,6 +187,8 @@ export function Dashboard({ hospitals, interactions, applications, users }: Dash
       });
 
       const total = monthHospitals.length;
+      const renewedCount = monthHospitals.filter(h => h.reapplied).length;
+      
       const dataPoint: any = {
         label,
         'Pre-6M': counts.pre6m,
@@ -191,7 +197,9 @@ export function Dashboard({ hospitals, interactions, applications, users }: Dash
         'Post-6-12M': counts.post6to12m,
         'Post-1-2Y': counts.post1to2y,
         'Pending': counts.pending,
-        total: total
+        total: total,
+        renewedPercent: total > 0 ? Math.round((renewedCount / total) * 100) : 0,
+        pendingPercent: total > 0 ? Math.round((counts.pending / total) * 100) : 0
       };
 
       if (trendView === 'percent' && total > 0) {
@@ -227,6 +235,30 @@ export function Dashboard({ hospitals, interactions, applications, users }: Dash
     return Object.entries(counts)
       .map(([name, value]) => ({ name, value }))
       .filter(item => item.value > 0);
+  }, [filteredHospitals]);
+
+  const bedRetentionData = useMemo(() => {
+    const categories = [
+      { label: 'Upto 50 Beds', min: 0, max: 50 },
+      { label: '51-100 Beds', min: 51, max: 100 },
+      { label: '101-300 Beds', min: 101, max: 300 },
+      { label: '301 and Above', min: 301, max: 99999 },
+    ];
+
+    return categories.map(cat => {
+      const cohort = filteredHospitals.filter(h => h.beds >= cat.min && h.beds <= cat.max);
+      const total = cohort.length;
+      const renewed = cohort.filter(h => h.reapplied).length;
+      const rate = total > 0 ? Math.round((renewed / total) * 100) : 0;
+
+      return {
+        category: cat.label,
+        total,
+        renewed,
+        pending: total - renewed,
+        rate
+      };
+    });
   }, [filteredHospitals]);
 
   const notRenewedBreakdown = useMemo(() => {
@@ -267,23 +299,11 @@ export function Dashboard({ hospitals, interactions, applications, users }: Dash
   const COLORS = ['#1c1917', '#44403c', '#78716c', '#a8a29e', '#d6d3d1'];
   const RENEWAL_COLORS = ['#10b981', '#f43f5e'];
   const BREAKDOWN_COLORS = ['#3b82f6', '#f97316', '#d6d3d1'];
+  const BED_COLORS = ['#0ea5e9', '#8b5cf6', '#ec4899', '#f97316'];
 
-  const renderCustomBarLabel = (props: any) => {
+  const renderStackLabel = (props: any) => {
     const { x, y, width, height, value } = props;
-    if (height < 20 || !value) return null;
-    
-    let displayValue = '';
-    if (trendView === 'percent') {
-      displayValue = `${Math.round(value)}%`;
-    } else {
-      const total = props.payload?.total;
-      if (total && total > 0) {
-        displayValue = `${Math.round((value / total) * 100)}%`;
-      }
-    }
-    
-    if (!displayValue || displayValue === '0%') return null;
-
+    if (height < 15 || !value) return null;
     return (
       <text 
         x={x + width / 2} 
@@ -291,10 +311,10 @@ export function Dashboard({ hospitals, interactions, applications, users }: Dash
         fill="#fff" 
         textAnchor="middle" 
         dominantBaseline="middle" 
-        fontSize={9} 
+        fontSize={8} 
         fontWeight="bold"
       >
-        {displayValue}
+        {value}
       </text>
     );
   };
@@ -385,12 +405,13 @@ export function Dashboard({ hospitals, interactions, applications, users }: Dash
       </div>
 
       {/* Quick Stats */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-6">
         {[
           { label: 'Total Hospitals', value: stats.total, icon: TrendingUp, color: 'text-stone-600' },
           { label: 'Expired', value: stats.expired, icon: AlertCircle, color: 'text-red-500' },
-          { label: 'Due in 30 Days', value: stats.dueSoon, icon: Clock, color: 'text-amber-500' },
-          { label: 'Retention Rate', value: `${stats.retentionRate}%`, icon: CheckCircle2, color: 'text-emerald-500' },
+          { label: 'Renewed', value: stats.renewed, icon: CheckCircle2, color: 'text-emerald-500' },
+          { label: 'Pending Renewals', value: stats.pendingRenewals, icon: Clock, color: 'text-amber-500' },
+          { label: 'Retention Rate', value: `${stats.retentionRate}%`, icon: CheckCircle2, color: 'text-blue-500' },
         ].map((stat, i) => (
           <div key={i} className="bg-white p-6 rounded-3xl border border-stone-200 shadow-sm">
             <div className="flex items-center justify-between mb-4">
@@ -571,26 +592,101 @@ export function Dashboard({ hospitals, interactions, applications, users }: Dash
                 }}
               />
               <Bar dataKey="Pre-6M" stackId="a" fill="#059669" barSize={40}>
-                <LabelList content={renderCustomBarLabel} />
+                <LabelList dataKey="Pre-6M" content={(props: any) => renderStackLabel(props)} />
               </Bar>
               <Bar dataKey="Pre-0-6M" stackId="a" fill="#34d399" barSize={40}>
-                <LabelList content={renderCustomBarLabel} />
+                <LabelList dataKey="Pre-0-6M" content={(props: any) => renderStackLabel(props)} />
               </Bar>
               <Bar dataKey="Post-0-6M" stackId="a" fill="#fbbf24" barSize={40}>
-                <LabelList content={renderCustomBarLabel} />
+                <LabelList dataKey="Post-0-6M" content={(props: any) => renderStackLabel(props)} />
               </Bar>
               <Bar dataKey="Post-6-12M" stackId="a" fill="#f97316" barSize={40}>
-                <LabelList content={renderCustomBarLabel} />
+                <LabelList dataKey="Post-6-12M" content={(props: any) => renderStackLabel(props)} />
               </Bar>
               <Bar dataKey="Post-1-2Y" stackId="a" fill="#ef4444" barSize={40}>
-                <LabelList content={renderCustomBarLabel} />
+                <LabelList dataKey="Post-1-2Y" content={(props: any) => renderStackLabel(props)} />
               </Bar>
               <Bar dataKey="Pending" stackId="a" fill="#d6d3d1" radius={[4, 4, 0, 0]} barSize={40}>
-                <LabelList content={renderCustomBarLabel} />
-                <LabelList dataKey="total" position="top" fontSize={10} fill="#78716c" offset={10} />
+                <LabelList dataKey="Pending" content={(props: any) => renderStackLabel(props)} />
+                <LabelList 
+                  dataKey="total" 
+                  position="top" 
+                  offset={10}
+                  content={(props: any) => {
+                    const { x, y, width, value, payload } = props;
+                    if (!value || !payload) return null;
+                    return (
+                      <g>
+                        <text x={x + width / 2} y={y - 25} fill="#1c1917" textAnchor="middle" fontSize={10} fontWeight="bold">
+                          {payload.renewedPercent ?? 0}% Ren.
+                        </text>
+                        <text x={x + width / 2} y={y - 12} fill="#ef4444" textAnchor="middle" fontSize={10} fontWeight="bold">
+                          {payload.pendingPercent ?? 0}% Pend.
+                        </text>
+                        <text x={x + width / 2} y={y + 12} fill="#78716c" textAnchor="middle" fontSize={9}>
+                          (n={value})
+                        </text>
+                      </g>
+                    );
+                  }} 
+                />
               </Bar>
             </BarChart>
           </ResponsiveContainer>
+        </div>
+      </div>
+
+      {/* Retention by Hospital Size */}
+      <div className="bg-white p-8 rounded-3xl border border-stone-200 shadow-sm">
+        <div className="mb-8">
+          <h3 className="text-lg font-serif font-bold text-stone-900">Retention by Hospital Size</h3>
+          <p className="text-xs text-stone-500">Are we retaining larger hospitals? Analysis by bed capacity.</p>
+        </div>
+
+        <div className="h-80">
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart data={bedRetentionData} margin={{ top: 20, right: 30, left: 0, bottom: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f5f5f4" />
+              <XAxis 
+                dataKey="category" 
+                axisLine={false} 
+                tickLine={false} 
+                fontSize={12} 
+                tick={{ fill: '#78716c' }}
+              />
+              <YAxis 
+                axisLine={false} 
+                tickLine={false} 
+                fontSize={10} 
+                tick={{ fill: '#78716c' }}
+                label={{ value: 'Renewal Rate (%)', angle: -90, position: 'insideLeft', offset: 15, fontSize: 10, fill: '#a8a29e' }}
+              />
+              <Tooltip 
+                cursor={{ fill: '#fafaf9' }}
+                contentStyle={{ 
+                  borderRadius: '16px', 
+                  border: '1px solid #e7e5e4',
+                  boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)'
+                }}
+              />
+              <Bar dataKey="rate" barSize={60} radius={[4, 4, 0, 0]}>
+                {bedRetentionData.map((entry, index) => (
+                  <Cell key={`cell-${index}`} fill={BED_COLORS[index % BED_COLORS.length]} />
+                ))}
+                <LabelList dataKey="rate" position="top" formatter={(val: any) => `${val}%`} fontSize={12} fontWeight="bold" fill="#1c1917" offset={10} />
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+        
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-8 pt-8 border-t border-stone-100">
+          {bedRetentionData.map((d, i) => (
+            <div key={i} className="text-center">
+              <p className="text-[10px] font-bold text-stone-400 uppercase tracking-widest mb-1">{d.category}</p>
+              <p className="text-xl font-serif font-bold text-stone-900">{d.renewed} / {d.total}</p>
+              <p className="text-[10px] text-stone-500 italic">Renewals</p>
+            </div>
+          ))}
         </div>
       </div>
 
@@ -883,4 +979,4 @@ export function Dashboard({ hospitals, interactions, applications, users }: Dash
       </div>
     </div>
   );
-}
+});

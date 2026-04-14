@@ -25,10 +25,13 @@ export const generateHospitalReport = (
   // 1. Key Performance Indicators
   const total = hospitals.length;
   const renewed = hospitals.filter(h => h.reapplied).length;
-  const expired = hospitals.filter(h => {
+  const pending = hospitals.filter(h => !h.reapplied).length;
+  const expiredHospitals = hospitals.filter(h => {
     const expiry = new Date(h.expiryDate);
     return expiry < new Date();
-  }).length;
+  });
+  const expiredCount = expiredHospitals.length;
+  const expiredRenewedCount = expiredHospitals.filter(h => h.reapplied).length;
 
   doc.setFontSize(14);
   doc.setTextColor(28, 25, 23);
@@ -37,8 +40,9 @@ export const generateHospitalReport = (
   const statsData = [
     ['Total Hospitals Under Management', total.toString()],
     ['Successfully Renewed', renewed.toString()],
-    ['Currently Expired', expired.toString()],
-    ['Overall Retention Rate', expired > 0 ? `${Math.round((renewed / expired) * 100)}%` : '100%']
+    ['Currently Expired', expiredCount.toString()],
+    ['Pending Renewals', pending.toString()],
+    ['Overall Retention Rate', expiredCount > 0 ? `${Math.round((expiredRenewedCount / expiredCount) * 100)}%` : '100%']
   ];
 
   autoTable(doc, {
@@ -106,7 +110,35 @@ export const generateHospitalReport = (
     styles: { fontSize: 10 }
   });
 
-  // 4. Managerial Placeholders
+  // 4. Retention by Hospital Size (Beds)
+  const finalYBed = (doc as any).lastAutoTable.finalY;
+  doc.text('Retention by Hospital Size (Beds)', 14, finalYBed + 15);
+
+  const bedCategories = [
+    { label: 'Upto 50 Beds', min: 0, max: 50 },
+    { label: '51-100 Beds', min: 51, max: 100 },
+    { label: '101-300 Beds', min: 101, max: 300 },
+    { label: '301 and Above', min: 301, max: 99999 },
+  ];
+
+  const bedRows = bedCategories.map(cat => {
+    const cohort = hospitals.filter(h => h.beds >= cat.min && h.beds <= cat.max);
+    const total = cohort.length;
+    const renewed = cohort.filter(h => h.reapplied).length;
+    const rate = total > 0 ? Math.round((renewed / total) * 100) : 0;
+    return [cat.label, total.toString(), renewed.toString(), `${rate}%`];
+  });
+
+  autoTable(doc, {
+    startY: finalYBed + 20,
+    head: [['Bed Category', 'Total Hospitals', 'Renewed', 'Retention Rate']],
+    body: bedRows,
+    theme: 'grid',
+    headStyles: { fillColor: [28, 25, 23] },
+    styles: { fontSize: 10 }
+  });
+
+  // 5. Managerial Placeholders
   doc.addPage();
   doc.setFontSize(16);
   doc.text('Managerial Insights & Team Performance', 14, 22);
