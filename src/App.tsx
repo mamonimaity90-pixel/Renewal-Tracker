@@ -8,7 +8,7 @@ import {
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword
 } from 'firebase/auth';
-import { doc, getDoc, setDoc, onSnapshot, collection, query, orderBy } from 'firebase/firestore';
+import { doc, getDoc, setDoc, onSnapshot, collection, query, orderBy, limit } from 'firebase/firestore';
 import { Hospital, User, Interaction, Application } from './types';
 import { Layout } from './components/Layout';
 import { Dashboard } from './components/Dashboard';
@@ -32,6 +32,7 @@ export default function App() {
   const [password, setPassword] = useState('');
   const [name, setName] = useState('');
   const [authError, setAuthError] = useState('');
+  const [quotaExceeded, setQuotaExceeded] = useState(false);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
@@ -55,7 +56,10 @@ export default function App() {
               handleFirestoreError(err, OperationType.WRITE, userPath);
             }
           }
-        } catch (error) {
+        } catch (error: any) {
+          if (error.message?.includes('Quota limit exceeded') || error.code === 'resource-exhausted') {
+            setQuotaExceeded(true);
+          }
           handleFirestoreError(error, OperationType.GET, userPath);
         }
       } else {
@@ -78,19 +82,40 @@ export default function App() {
 
     const unsubHospitals = onSnapshot(collection(db, 'hospitals'), (snapshot) => {
       setHospitals(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Hospital)));
-    }, (error) => handleFirestoreError(error, OperationType.GET, 'hospitals'));
+    }, (error) => {
+      if (error.message?.includes('Quota limit exceeded') || error.code === 'resource-exhausted') {
+        setQuotaExceeded(true);
+      }
+      handleFirestoreError(error, OperationType.GET, 'hospitals');
+    });
 
-    const unsubInteractions = onSnapshot(query(collection(db, 'interactions'), orderBy('timestamp', 'desc')), (snapshot) => {
+    // Limit interactions to the last 500 to save on read units
+    const unsubInteractions = onSnapshot(query(collection(db, 'interactions'), orderBy('timestamp', 'desc'), limit(500)), (snapshot) => {
       setInteractions(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Interaction)));
-    }, (error) => handleFirestoreError(error, OperationType.GET, 'interactions'));
+    }, (error) => {
+      if (error.message?.includes('Quota limit exceeded') || error.code === 'resource-exhausted') {
+        setQuotaExceeded(true);
+      }
+      handleFirestoreError(error, OperationType.GET, 'interactions');
+    });
 
     const unsubApplications = onSnapshot(collection(db, 'applications'), (snapshot) => {
       setApplications(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Application)));
-    }, (error) => handleFirestoreError(error, OperationType.GET, 'applications'));
+    }, (error) => {
+      if (error.message?.includes('Quota limit exceeded') || error.code === 'resource-exhausted') {
+        setQuotaExceeded(true);
+      }
+      handleFirestoreError(error, OperationType.GET, 'applications');
+    });
 
     const unsubUsers = onSnapshot(collection(db, 'users'), (snapshot) => {
       setUsers(snapshot.docs.map(doc => ({ uid: doc.id, ...doc.data() } as User)));
-    }, (error) => handleFirestoreError(error, OperationType.GET, 'users'));
+    }, (error) => {
+      if (error.message?.includes('Quota limit exceeded') || error.code === 'resource-exhausted') {
+        setQuotaExceeded(true);
+      }
+      handleFirestoreError(error, OperationType.GET, 'users');
+    });
 
     return () => {
       unsubHospitals();
@@ -149,6 +174,36 @@ export default function App() {
     return (
       <div className="min-h-screen flex items-center justify-center bg-stone-50">
         <Loader2 className="w-8 h-8 animate-spin text-stone-400" />
+      </div>
+    );
+  }
+
+  if (quotaExceeded) {
+    return (
+      <div className="min-h-screen bg-stone-50 flex items-center justify-center p-4">
+        <div className="bg-white p-8 rounded-3xl shadow-sm border border-stone-100 max-w-md w-full text-center">
+          <div className="w-16 h-16 bg-amber-50 rounded-full flex items-center justify-center mx-auto mb-6">
+            <AlertCircle className="w-8 h-8 text-amber-600" />
+          </div>
+          <h1 className="text-2xl font-serif font-bold text-stone-900 mb-4">Daily Limit Reached</h1>
+          <p className="text-stone-600 mb-6 leading-relaxed">
+            The application has reached its daily limit for data reads. This is a restriction of the free tier and will automatically reset tomorrow.
+          </p>
+          <div className="bg-stone-50 p-4 rounded-xl text-left mb-6">
+            <p className="text-xs font-bold text-stone-400 uppercase mb-2">What you can do:</p>
+            <ul className="text-sm text-stone-600 space-y-2 list-disc pl-4">
+              <li>Wait for the daily reset (midnight US Pacific Time)</li>
+              <li>Check back tomorrow to continue your work</li>
+              <li>Avoid frequent refreshes once it resets</li>
+            </ul>
+          </div>
+          <button 
+            onClick={() => window.location.reload()}
+            className="w-full bg-stone-900 text-white py-3 px-6 rounded-xl hover:bg-stone-800 transition-colors font-medium"
+          >
+            Try Refreshing
+          </button>
+        </div>
       </div>
     );
   }
