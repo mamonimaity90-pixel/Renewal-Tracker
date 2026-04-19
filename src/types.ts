@@ -47,10 +47,20 @@ export interface Interaction {
     | 'SPOC change'
     | 'Will apply soon'
     | 'Yet to decide'
+    | 'Certification to Accreditation'
+    | 'Already applied for renewal'
     | 'Others';
   notes?: string;
   remarks?: string;
   followUpDate?: string;
+  // Reapplication verification fields
+  reapplied?: boolean;
+  reapplicationProgram?: string;
+  reapplicationNumber?: string;
+  verificationStatus?: 'Pending' | 'Verified' | 'Rejected';
+  verifiedBy?: string;
+  verifiedAt?: string;
+  assignedToName?: string; // Captured at time of logging
 }
 
 export interface Application {

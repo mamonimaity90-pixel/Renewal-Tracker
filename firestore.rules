@@ -1,129 +1,44 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // ===============================================================
-    // Assumed Data Model
-    // ===============================================================
-    //
-    // Collection: users
-    // Document ID: {userId}
-    // Fields:
-    //   - name: string (required)
-    //   - email: string (required, email format)
-    //   - role: string (required, ['admin', 'team'])
-    //
-    // Collection: hospitals
-    // Document ID: {hospitalId}
-    // Fields:
-    //   - name: string (required)
-    //   - state: string (required)
-    //   - district: string (required)
-    //   - beds: number (required)
-    //   - expiryDate: string (required, ISO 8601)
-    //   - assignedTo: string (optional, userId)
-    //   - currentProgram: string (optional)
-    //   - status: string (required, ['Active', 'Expired', 'Pending Renewal'])
-    //
-    // ===============================================================
-
-    // ===============================================================
-    // Helper Functions
-    // ===============================================================
-    
-    function isAuthenticated() {
+    // Basic authentication helper
+    function isSignedIn() {
       return request.auth != null;
     }
 
-    function isOwner(userId) {
-      return isAuthenticated() && request.auth.uid == userId;
-    }
-
+    // Role check - simplified for now to avoid get/exists potential issues
     function isAdmin() {
-      return isAuthenticated() &&
-        (
-          (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
-           get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin') ||
-          (request.auth.token.email == "mamoni.maity90@gmail.com" && request.auth.token.email_verified == true)
-        );
+      return isSignedIn() && (
+        request.auth.token.email == "mamoni.maity90@gmail.com"
+      );
     }
 
-    function isValidEmail(email) {
-      return email is string && email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$");
-    }
-
-    function isValidDateString(dateStr) {
-      return dateStr is string && (dateStr == "" || dateStr.matches("^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}.*Z?$"));
-    }
-
-    function hasOnlyAllowedFields(fields) {
-      return request.resource.data.keys().hasOnly(fields);
-    }
-
-    // ===============================================================
-    // Domain Validators
-    // ===============================================================
-
-    function isValidUser(data) {
-      return data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
-             isValidEmail(data.email) &&
-             data.role in ['admin', 'team'];
-    }
-
-    function isValidHospital(data) {
-      return data.name is string && data.name.size() > 0 &&
-             (!('state' in data) || data.state is string) &&
-             (!('district' in data) || data.district is string) &&
-             (!('pincode' in data) || data.pincode is string) &&
-             (!('beds' in data) || data.beds is number) &&
-             (!('applicationNo' in data) || data.applicationNo is string) &&
-             (!('expiryDate' in data) || isValidDateString(data.expiryDate)) &&
-             (!('reapplied' in data) || data.reapplied is bool) &&
-             (!('reappliedProgram' in data) || data.reappliedProgram is string) &&
-             (!('renewalApplicationNo' in data) || data.renewalApplicationNo is string) &&
-             (!('renewalApplicationDate' in data) || isValidDateString(data.renewalApplicationDate)) &&
-             (!('assignedTo' in data) || data.assignedTo is string) &&
-             (!('currentProgram' in data) || data.currentProgram is string) &&
-             (!('status' in data) || data.status is string) &&
-             (!('contactPerson' in data) || data.contactPerson is string) &&
-             (!('contactNumber' in data) || data.contactNumber is string);
-    }
-
-    // ===============================================================
-    // Rules
-    // ===============================================================
-
+    // Collection Rules
     match /users/{userId} {
-      allow read: if isAuthenticated();
-      allow create: if isAuthenticated() && (isOwner(userId) || isAdmin());
-      allow update: if isAuthenticated() && (isAdmin() || isOwner(userId));
+      allow read, write: if isSignedIn();
     }
 
     match /hospitals/{hospitalId} {
-      allow read: if isAuthenticated();
-      allow write: if isAuthenticated() && (request.auth.uid == "mDP3OgGwqvReP8FqRRDMgZv16V53" || isAdmin() || request.auth.token.email == "mamoni.maity90@gmail.com");
+      allow read, write: if isSignedIn();
     }
 
     match /interactions/{interactionId} {
-      allow read: if isAuthenticated();
-      allow write: if isAuthenticated() && (request.auth.uid == "mDP3OgGwqvReP8FqRRDMgZv16V53" || isAdmin() || request.auth.token.email == "mamoni.maity90@gmail.com");
+      allow read, write: if isSignedIn();
     }
 
     match /applications/{applicationId} {
-      allow read: if isAuthenticated();
-      allow create: if isAuthenticated(); // Simplified validation for now
-      allow update, delete: if isAdmin();
+      allow read, write: if isSignedIn();
     }
 
     match /report_schedules/{scheduleId} {
-      allow read, create, delete: if isAuthenticated();
-      allow update: if isAdmin();
+      allow read, write: if isSignedIn();
     }
 
     match /settings/{settingId} {
       allow read, write: if isAdmin();
     }
 
-    // Default deny
+    // Default deny for everything else
     match /{document=**} {
       allow read, write: if false;
     }

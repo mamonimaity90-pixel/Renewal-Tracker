@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { db, auth } from '../firebase';
 import { collection, addDoc, onSnapshot, deleteDoc, doc, query, where } from 'firebase/firestore';
 import { Calendar, Mail, Trash2, Plus, Loader2, CheckCircle2 } from 'lucide-react';
+import { normalizeDate } from '../lib/utils';
 
 export function ReportScheduler() {
   const [schedules, setSchedules] = useState<any[]>([]);
@@ -18,7 +19,14 @@ export function ReportScheduler() {
   useEffect(() => {
     const q = query(collection(db, 'report_schedules'));
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      const data = snapshot.docs.map(doc => {
+        const item = doc.data();
+        return {
+          id: doc.id,
+          ...item,
+          lastSent: normalizeDate(item.lastSent)
+        };
+      });
       setSchedules(data);
       setLoading(false);
     });

@@ -10,12 +10,15 @@ import {
 } from 'firebase/auth';
 import { doc, getDoc, setDoc, onSnapshot, collection, query, orderBy, limit } from 'firebase/firestore';
 import { Hospital, User, Interaction, Application } from './types';
+import { normalizeDate } from './lib/utils';
 import { Layout } from './components/Layout';
 import { Dashboard } from './components/Dashboard';
 import { HospitalList } from './components/HospitalList';
 import { TeamManagement } from './components/TeamManagement';
-import { LogInteraction } from './components/LogInteraction';
-import { LogApplication } from './components/LogApplication';
+import { ActivityLog } from './components/ActivityLog';
+import { VerificationQueue } from './components/VerificationQueue';
+import { ReportScheduler } from './components/ReportScheduler';
+import { SettingsManager } from './components/SettingsManager';
 import { LogIn, LogOut, Loader2, Mail, Lock, User as UserIcon, AlertCircle } from 'lucide-react';
 
 export default function App() {
@@ -25,7 +28,7 @@ export default function App() {
   const [interactions, setInteractions] = useState<Interaction[]>([]);
   const [applications, setApplications] = useState<Application[]>([]);
   const [users, setUsers] = useState<User[]>([]);
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'hospitals' | 'team' | 'logs'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'hospitals' | 'team' | 'verification' | 'logs' | 'settings'>('dashboard');
   const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [authMode, setAuthMode] = useState<'login' | 'signup' | 'google'>('google');
   const [email, setEmail] = useState('');
@@ -81,7 +84,15 @@ export default function App() {
     }
 
     const unsubHospitals = onSnapshot(collection(db, 'hospitals'), (snapshot) => {
-      setHospitals(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Hospital)));
+      setHospitals(snapshot.docs.map(doc => {
+        const data = doc.data();
+        return { 
+          id: doc.id, 
+          ...data,
+          expiryDate: normalizeDate(data.expiryDate),
+          renewalApplicationDate: normalizeDate(data.renewalApplicationDate)
+        } as Hospital;
+      }));
     }, (error) => {
       if (error.message?.includes('Quota limit exceeded') || error.code === 'resource-exhausted') {
         setQuotaExceeded(true);
@@ -91,7 +102,16 @@ export default function App() {
 
     // Limit interactions to the last 500 to save on read units
     const unsubInteractions = onSnapshot(query(collection(db, 'interactions'), orderBy('timestamp', 'desc'), limit(500)), (snapshot) => {
-      setInteractions(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Interaction)));
+      setInteractions(snapshot.docs.map(doc => {
+        const data = doc.data();
+        return { 
+          id: doc.id, 
+          ...data,
+          timestamp: normalizeDate(data.timestamp),
+          verifiedAt: normalizeDate(data.verifiedAt),
+          followUpDate: normalizeDate(data.followUpDate)
+        } as Interaction;
+      }));
     }, (error) => {
       if (error.message?.includes('Quota limit exceeded') || error.code === 'resource-exhausted') {
         setQuotaExceeded(true);
@@ -100,7 +120,14 @@ export default function App() {
     });
 
     const unsubApplications = onSnapshot(collection(db, 'applications'), (snapshot) => {
-      setApplications(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Application)));
+      setApplications(snapshot.docs.map(doc => {
+        const data = doc.data();
+        return { 
+          id: doc.id, 
+          ...data,
+          applicationDate: normalizeDate(data.applicationDate)
+        } as Application;
+      }));
     }, (error) => {
       if (error.message?.includes('Quota limit exceeded') || error.code === 'resource-exhausted') {
         setQuotaExceeded(true);
@@ -349,10 +376,21 @@ export default function App() {
       {activeTab === 'team' && user.role === 'admin' && (
         <TeamManagement users={users} />
       )}
+      {activeTab === 'verification' && user.role === 'admin' && (
+        <VerificationQueue 
+          interactions={interactions} 
+          hospitals={hospitals} 
+          users={users} 
+          currentUser={user}
+        />
+      )}
       {activeTab === 'logs' && (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-          <LogInteraction hospitals={hospitals} user={user} />
-          <LogApplication hospitals={hospitals} />
+        <ActivityLog hospitals={hospitals} interactions={interactions} users={users} />
+      )}
+      {activeTab === 'settings' && user.role === 'admin' && (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+          <ReportScheduler />
+          <SettingsManager />
         </div>
       )}
     </Layout>

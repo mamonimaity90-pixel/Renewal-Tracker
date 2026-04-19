@@ -24,8 +24,8 @@ import {
 } from 'lucide-react';
 import { format, parseISO, isBefore, isAfter } from 'date-fns';
 import Papa from 'papaparse';
-import { db } from '../firebase';
-import { collection, addDoc, updateDoc, doc, writeBatch } from 'firebase/firestore';
+import { db, auth } from '../firebase';
+import { collection, addDoc, updateDoc, doc, writeBatch, serverTimestamp } from 'firebase/firestore';
 import { cn } from '../lib/utils';
 import { BulkUpload } from './BulkUpload';
 
@@ -735,8 +735,20 @@ function LogInteractionModal({ hospital, interactions, users, onClose }: {
   });
   const [loading, setLoading] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
+  const [reapplicationData, setReapplicationData] = useState({
+    reapplied: false,
+    reapplicationProgram: '',
+    reapplicationNumber: '',
+    reapplicationDate: ''
+  });
+
+  const needsReapplicationDetails = 
+    formData.reason === 'Certification to Accreditation' || 
+    formData.reason === 'Already applied for renewal';
 
   const reasons = [
+    'Certification to Accreditation',
+    'Already applied for renewal',
     'Applied elsewhere',
     'Concerned person not available',
     'Does not see benefit',
@@ -754,11 +766,23 @@ function LogInteractionModal({ hospital, interactions, users, onClose }: {
     e.preventDefault();
     setLoading(true);
     try {
+      const assignedUser = users.find(u => u.uid === hospital.assignedTo);
       const dataToSave: any = {
         hospitalId: hospital.id,
-        timestamp: new Date().toISOString(),
+        timestamp: serverTimestamp(),
+        userId: auth.currentUser?.uid,
+        assignedToName: assignedUser?.name || 'Unassigned',
         ...formData
       };
+
+      if (needsReapplicationDetails) {
+        dataToSave.reapplied = reapplicationData.reapplied;
+        dataToSave.reapplicationProgram = reapplicationData.reapplicationProgram;
+        dataToSave.reapplicationNumber = reapplicationData.reapplicationNumber;
+        dataToSave.reapplicationDate = reapplicationData.reapplicationDate;
+        dataToSave.verificationStatus = 'Pending';
+      }
+
       if (formData.result !== 'Connected') {
         delete dataToSave.reason;
         delete dataToSave.remarks;
@@ -818,6 +842,7 @@ function LogInteractionModal({ hospital, interactions, users, onClose }: {
                         </div>
                         <span className="text-[10px] font-medium text-stone-500">
                           by {users.find(u => u.uid === interaction.userId)?.name || 'Unknown'}
+                          {interaction.assignedToName && ` • Assigned to: ${interaction.assignedToName}`}
                         </span>
                       </div>
                       {interaction.reason && (
@@ -886,6 +911,64 @@ function LogInteractionModal({ hospital, interactions, users, onClose }: {
                       ))}
                     </select>
                   </div>
+
+                  {needsReapplicationDetails && (
+                    <div className="p-4 bg-amber-50 rounded-2xl border border-amber-100 space-y-4 animate-in zoom-in-95 duration-200">
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          id="modal-reapplied"
+                          className="w-4 h-4 rounded border-stone-300 text-stone-900 focus:ring-stone-900"
+                          checked={reapplicationData.reapplied}
+                          onChange={e => setReapplicationData({...reapplicationData, reapplied: e.target.checked})}
+                        />
+                        <label htmlFor="modal-reapplied" className="text-xs font-bold text-stone-700 uppercase">Reapplied for renewal?</label>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-[10px] font-bold text-amber-900 uppercase mb-1">Reapplication Program</label>
+                          <select
+                            required={needsReapplicationDetails}
+                            className="w-full p-2.5 bg-white border border-amber-200 rounded-xl text-sm"
+                            value={reapplicationData.reapplicationProgram}
+                            onChange={e => setReapplicationData({...reapplicationData, reapplicationProgram: e.target.value})}
+                          >
+                            <option value="">Select Program</option>
+                            <option value="HCO">HCO</option>
+                            <option value="SHCO">SHCO</option>
+                            <option value="ECO">ECO</option>
+                            <option value="ELCP">ELCP</option>
+                          </select>
+                        </div>
+                        <div>
+                          <label className="block text-[10px] font-bold text-amber-900 uppercase mb-1">Application Number</label>
+                          <input
+                            type="text"
+                            required={needsReapplicationDetails}
+                            placeholder="NABH-202X-XXXX"
+                            className="w-full p-2.5 bg-white border border-amber-200 rounded-xl text-sm"
+                            value={reapplicationData.reapplicationNumber}
+                            onChange={e => setReapplicationData({...reapplicationData, reapplicationNumber: e.target.value})}
+                          />
+                        </div>
+                        <div className="col-span-2">
+                          <label className="block text-[10px] font-bold text-amber-900 uppercase mb-1">Renewal Application Date</label>
+                          <input
+                            type="date"
+                            required={needsReapplicationDetails}
+                            className="w-full p-2.5 bg-white border border-amber-200 rounded-xl text-sm"
+                            value={reapplicationData.reapplicationDate}
+                            onChange={e => setReapplicationData({...reapplicationData, reapplicationDate: e.target.value})}
+                          />
+                        </div>
+                      </div>
+                      <p className="text-[10px] text-amber-600 italic leading-relaxed">
+                        * Note: These details will be sent to the admin for verification.
+                      </p>
+                    </div>
+                  )}
+
                   <div>
                     <label className="block text-[10px] font-bold text-stone-400 uppercase mb-1">Remarks</label>
                     <textarea

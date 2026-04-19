@@ -18,8 +18,6 @@ import { FileText, AlertCircle, CheckCircle2, Clock, TrendingUp, Filter, Search,
 import { format, isAfter, isBefore, parseISO, differenceInDays, differenceInMonths } from 'date-fns';
 import { cn } from '../lib/utils';
 import { generateHospitalReport } from '../lib/reportGenerator';
-import { ReportScheduler } from './ReportScheduler';
-import { SettingsManager } from './SettingsManager';
 
 interface DashboardProps {
   hospitals: Hospital[];
@@ -286,15 +284,17 @@ export const Dashboard = memo(function Dashboard({ hospitals, interactions, appl
 
   const reasonData = useMemo(() => {
     const counts: Record<string, number> = {};
+    const notAppliedHospitalIds = new Set(filteredHospitals.filter(h => !h.reapplied).map(h => h.id));
+    
     filteredInteractions.forEach(i => {
-      if (i.result === 'Connected' && i.reason) {
+      if (i.result === 'Connected' && i.reason && notAppliedHospitalIds.has(i.hospitalId)) {
         counts[i.reason] = (counts[i.reason] || 0) + 1;
       }
     });
     return Object.entries(counts)
       .map(([name, value]) => ({ name, value }))
       .sort((a, b) => b.value - a.value);
-  }, [filteredInteractions]);
+  }, [filteredInteractions, filteredHospitals]);
 
   const COLORS = ['#1c1917', '#44403c', '#78716c', '#a8a29e', '#d6d3d1'];
   const RENEWAL_COLORS = ['#10b981', '#f43f5e'];
@@ -405,10 +405,9 @@ export const Dashboard = memo(function Dashboard({ hospitals, interactions, appl
       </div>
 
       {/* Quick Stats */}
-      <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         {[
           { label: 'Total Hospitals', value: stats.total, icon: TrendingUp, color: 'text-stone-600' },
-          { label: 'Expired', value: stats.expired, icon: AlertCircle, color: 'text-red-500' },
           { label: 'Renewed', value: stats.renewed, icon: CheckCircle2, color: 'text-emerald-500' },
           { label: 'Pending Renewals', value: stats.pendingRenewals, icon: Clock, color: 'text-amber-500' },
           { label: 'Retention Rate', value: `${stats.retentionRate}%`, icon: CheckCircle2, color: 'text-blue-500' },
@@ -932,49 +931,6 @@ export const Dashboard = memo(function Dashboard({ hospitals, interactions, appl
               </tbody>
             </table>
           </div>
-        </div>
-
-        {/* Recent Activity */}
-        <div className="bg-white p-8 rounded-3xl border border-stone-200 shadow-sm lg:col-span-2">
-          <h3 className="text-lg font-serif font-bold text-stone-900 mb-6">Recent Interactions</h3>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {filteredInteractions.slice(0, 10).map((log, i) => {
-              const hospital = hospitals.find(h => h.id === log.hospitalId);
-              return (
-                <div key={i} className="flex flex-col p-4 rounded-2xl bg-stone-50 border border-stone-100 hover:bg-stone-100/50 transition-colors">
-                  <div className="flex items-center justify-between mb-2">
-                    <span className={cn(
-                      "px-2 py-0.5 rounded text-[10px] font-bold uppercase",
-                      log.result === 'Connected' ? "bg-emerald-100 text-emerald-700" : "bg-red-100 text-red-700"
-                    )}>
-                      {log.result}
-                    </span>
-                    <span className="text-[10px] text-stone-400">
-                      {format(parseISO(log.timestamp), 'MMM d, h:mm a')}
-                    </span>
-                  </div>
-                  <p className="text-sm font-semibold text-stone-900 mb-1">
-                    {hospital?.name || 'Unknown Hospital'}
-                  </p>
-                  {log.reason && (
-                    <p className="text-[10px] font-bold text-stone-600 mb-1">Reason: {log.reason}</p>
-                  )}
-                  {log.remarks && (
-                    <p className="text-xs text-stone-500 italic line-clamp-2">"{log.remarks}"</p>
-                  )}
-                </div>
-              );
-            })}
-            {filteredInteractions.length === 0 && (
-              <p className="text-center text-stone-400 py-10 italic col-span-2">No interactions found for selected filters.</p>
-            )}
-          </div>
-        </div>
-
-        {/* Report Scheduling & Settings */}
-        <div className="lg:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-6">
-          <ReportScheduler />
-          <SettingsManager />
         </div>
       </div>
     </div>

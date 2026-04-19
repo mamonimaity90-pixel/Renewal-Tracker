@@ -1,113 +1,124 @@
 {
   "entities": {
-    "Hospital": {
-      "title": "Hospital",
-      "description": "Represents a hospital in the tracking system.",
-      "type": "object",
-      "properties": {
-        "name": { "type": "string", "description": "Name of the hospital" },
-        "state": { "type": "string", "description": "State location" },
-        "district": { "type": "string", "description": "District location" },
-        "pincode": { "type": "string", "description": "Pincode" },
-        "beds": { "type": "number", "description": "Number of beds" },
-        "applicationNo": { "type": "string", "description": "Original Application Number" },
-        "expiryDate": { "type": "string", "format": "date-time", "description": "NABH expiry date" },
-        "reapplied": { "type": "boolean", "description": "Has the hospital reapplied?" },
-        "reappliedProgram": { "type": "string", "description": "Program under which reapplied" },
-        "renewalApplicationNo": { "type": "string", "description": "Renewal Application Number" },
-        "renewalApplicationDate": { "type": "string", "format": "date-time", "description": "Renewal Application Date" },
-        "assignedTo": { "type": "string", "description": "UID of the team member assigned" },
-        "currentProgram": { "type": "string", "description": "Current NABH program" },
-        "status": { "type": "string", "enum": ["Active", "Expired", "Pending Renewal"], "description": "Current compliance status" }
-      },
-      "required": ["name", "state", "district", "beds", "expiryDate"]
-    },
     "User": {
       "title": "User",
-      "description": "System user (team member or admin).",
+      "description": "User profile and role information",
       "type": "object",
       "properties": {
+        "uid": { "type": "string" },
         "name": { "type": "string" },
         "email": { "type": "string", "format": "email" },
         "role": { "type": "string", "enum": ["admin", "team"] }
       },
-      "required": ["name", "email", "role"]
+      "required": ["uid", "name", "email", "role"]
+    },
+    "Hospital": {
+      "title": "Hospital",
+      "description": "Healthcare facility details for compliance tracking",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "state": { "type": "string" },
+        "district": { "type": "string" },
+        "pincode": { "type": "string" },
+        "beds": { "type": "number" },
+        "applicationNo": { "type": "string" },
+        "expiryDate": { "type": "string", "format": "date-time" },
+        "reapplied": { "type": "boolean" },
+        "reappliedProgram": { "type": "string" },
+        "renewalApplicationNo": { "type": "string" },
+        "renewalApplicationDate": { "type": "string", "format": "date-time" },
+        "assignedTo": { "type": "string" },
+        "currentProgram": { "type": "string" },
+        "status": { "type": "string", "enum": ["Active", "Expired", "Pending Renewal"] },
+        "contactPerson": { "type": "string" },
+        "contactNumber": { "type": "string" }
+      },
+      "required": ["name", "status"]
     },
     "Interaction": {
       "title": "Interaction",
-      "description": "Records of calls or meetings with hospitals.",
+      "description": "Logged interaction with a hospital officer",
       "type": "object",
       "properties": {
+        "id": { "type": "string" },
         "hospitalId": { "type": "string" },
+        "hospitalName": { "type": "string" },
         "userId": { "type": "string" },
-        "timestamp": { "type": "string", "format": "date-time" },
-        "type": { "type": "string", "enum": ["Call", "Email", "Meeting"] },
-        "result": { "type": "string", "enum": ["Connected", "Not Connected"] },
-        "reason": { "type": "string", "description": "Reason for connected call" },
-        "remarks": { "type": "string" },
+        "userName": { "type": "string" },
+        "type": { "type": "string", "enum": ["call", "visit", "email", "other"] },
         "notes": { "type": "string" },
-        "followUpDate": { "type": "string", "format": "date-time" }
+        "timestamp": { "type": "string", "format": "date-time" }
       },
-      "required": ["hospitalId", "userId", "timestamp", "type", "result"]
+      "required": ["hospitalId", "userId", "type", "timestamp"]
     },
     "Application": {
       "title": "Application",
-      "description": "Records of renewal applications.",
+      "description": "NABH application tracking",
       "type": "object",
       "properties": {
+        "id": { "type": "string" },
         "hospitalId": { "type": "string" },
-        "applicationNumber": { "type": "string" },
-        "applicationDate": { "type": "string", "format": "date-time" },
-        "programType": { "type": "string" },
-        "status": { "type": "string", "enum": ["Applied", "Under Review", "Approved", "Rejected"] }
+        "hospitalName": { "type": "string" },
+        "type": { "type": "string" },
+        "applicationNo": { "type": "string" },
+        "date": { "type": "string", "format": "date-time" },
+        "status": { "type": "string" },
+        "notes": { "type": "string" }
       },
-      "required": ["hospitalId", "applicationNumber", "applicationDate", "programType", "status"]
+      "required": ["hospitalId", "type", "applicationNo", "date"]
+    },
+    "ReportSchedule": {
+      "title": "Report Schedule",
+      "description": "Automated report configuration",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "frequency": { "type": "string", "enum": ["daily", "weekly", "monthly"] },
+        "recipients": { "type": "string" },
+        "type": { "type": "string", "enum": ["summary", "detailed"] },
+        "createdBy": { "type": "string" },
+        "lastSent": { "type": "string", "format": "date-time" }
+      },
+      "required": ["frequency", "recipients", "type"]
+    },
+    "Setting": {
+      "title": "Setting",
+      "description": "Global application setting",
+      "type": "object",
+      "properties": {
+        "key": { "type": "string" },
+        "value": { "type": "string" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["key", "value"]
     }
   },
   "firestore": {
-    "/hospitals/{hospitalId}": {
-      "schema": "Hospital",
-      "description": "Collection of hospitals being tracked."
-    },
-    "/users/{userId}": {
+    "users/{userId}": {
       "schema": "User",
-      "description": "System users and their roles."
+      "description": "User profiles"
     },
-    "/interactions/{interactionId}": {
+    "hospitals/{hospitalId}": {
+      "schema": "Hospital",
+      "description": "Hospital records"
+    },
+    "interactions/{interactionId}": {
       "schema": "Interaction",
-      "description": "Log of all interactions with hospitals."
+      "description": "Communication logs"
     },
-    "/applications/{applicationId}": {
+    "applications/{applicationId}": {
       "schema": "Application",
-      "description": "Renewal application records."
+      "description": "NABH applications"
     },
-    "/report_schedules/{scheduleId}": {
-      "schema": {
-        "title": "ReportSchedule",
-        "type": "object",
-        "properties": {
-          "frequency": { "type": "string", "enum": ["daily", "weekly", "monthly"] },
-          "recipients": { "type": "string", "description": "Comma separated emails" },
-          "type": { "type": "string", "enum": ["summary", "detailed"] },
-          "lastSent": { "type": "string", "format": "date-time" },
-          "createdBy": { "type": "string" }
-        },
-        "required": ["frequency", "recipients", "type"]
-      },
-      "description": "Configurations for automated email reports"
+    "report_schedules/{scheduleId}": {
+      "schema": "ReportSchedule",
+      "description": "Email report schedules"
     },
-    "/settings/{settingId}": {
-      "schema": {
-        "title": "Setting",
-        "type": "object",
-        "properties": {
-          "key": { "type": "string" },
-          "value": { "type": "string" },
-          "updatedAt": { "type": "string", "format": "date-time" }
-        },
-        "required": ["key", "value"]
-      },
-      "description": "Global application settings (e.g. API keys)"
+    "settings/{settingId}": {
+      "schema": "Setting",
+      "description": "System settings like API keys"
     }
   }
 }

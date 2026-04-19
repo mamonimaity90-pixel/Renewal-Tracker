@@ -4,7 +4,9 @@ import {
   LayoutDashboard, 
   Hospital as HospitalIcon, 
   Users, 
-  ClipboardList, 
+  ClipboardList,
+  ClipboardCheck, 
+  Settings,
   LogOut,
   Menu,
   X
@@ -26,7 +28,11 @@ export function Layout({ user, onLogout, activeTab, setActiveTab, children }: La
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
     { id: 'hospitals', label: 'Hospitals', icon: HospitalIcon },
     { id: 'logs', label: 'Activity Logs', icon: ClipboardList },
-    ...(user.role === 'admin' ? [{ id: 'team', label: 'Team', icon: Users }] : []),
+    ...(user.role === 'admin' ? [
+      { id: 'verification', label: 'Verification', icon: ClipboardCheck },
+      { id: 'team', label: 'Team', icon: Users },
+      { id: 'settings', label: 'Settings', icon: Settings }
+    ] : []),
   ];
 
   return (
