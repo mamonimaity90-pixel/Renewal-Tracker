@@ -14,8 +14,8 @@ import {
   Legend,
   LabelList
 } from 'recharts';
-import { FileText, AlertCircle, CheckCircle2, Clock, TrendingUp, Filter, Search, X, ArrowUpDown, ChevronDown } from 'lucide-react';
-import { format, isAfter, isBefore, parseISO, differenceInDays, differenceInMonths } from 'date-fns';
+import { FileText, AlertCircle, CheckCircle2, Clock, TrendingUp, Filter, Search, X, ArrowUpDown, ChevronDown, Users, UserCheck, PhoneOff, Ban } from 'lucide-react';
+import { format, isAfter, isBefore, parseISO, differenceInDays, differenceInMonths, startOfDay } from 'date-fns';
 import { cn } from '../lib/utils';
 import { generateHospitalReport } from '../lib/reportGenerator';
 
@@ -24,14 +24,16 @@ interface DashboardProps {
   interactions: Interaction[];
   applications: Application[];
   users: User[];
+  setActiveTab?: (tab: any) => void;
 }
 
-export const Dashboard = memo(function Dashboard({ hospitals, interactions, applications, users }: DashboardProps) {
+export const Dashboard = memo(function Dashboard({ hospitals, interactions, applications, users, setActiveTab }: DashboardProps) {
   const now = new Date();
   
   // Filter States
   const [filterUser, setFilterUser] = useState('');
   const [filterState, setFilterState] = useState('');
+  const [filterBatch, setFilterBatch] = useState<'all' | 'historical' | 'upcoming'>('all');
   const [filterDateStart, setFilterDateStart] = useState('');
   const [filterDateEnd, setFilterDateEnd] = useState('');
   const [trendGranularity, setTrendGranularity] = useState<'month' | 'year'>('month');
@@ -45,15 +47,23 @@ export const Dashboard = memo(function Dashboard({ hospitals, interactions, appl
     return hospitals.filter(h => {
       const matchesUser = !filterUser || h.assignedTo === filterUser;
       const matchesState = !filterState || h.state === filterState;
+
+      let matchesBatch = true;
+      if (filterBatch !== 'all') {
+        const year = parseISO(h.expiryDate).getFullYear();
+        if (filterBatch === 'historical') matchesBatch = year < 2026;
+        if (filterBatch === 'upcoming') matchesBatch = year >= 2026;
+      }
+
       let matchesDate = true;
       if (filterDateStart || filterDateEnd) {
         const expiry = parseISO(h.expiryDate);
         if (filterDateStart && isBefore(expiry, parseISO(filterDateStart))) matchesDate = false;
         if (filterDateEnd && isAfter(expiry, parseISO(filterDateEnd))) matchesDate = false;
       }
-      return matchesUser && matchesState && matchesDate;
+      return matchesUser && matchesState && matchesBatch && matchesDate;
     });
-  }, [hospitals, filterUser, filterState, filterDateStart, filterDateEnd]);
+  }, [hospitals, filterUser, filterState, filterBatch, filterDateStart, filterDateEnd]);
 
   const timingAnalysis = useMemo(() => {
     const total = filteredHospitals.length;
@@ -121,8 +131,90 @@ export const Dashboard = memo(function Dashboard({ hospitals, interactions, appl
       ? Math.round((expiredRenewedCount / expiredCount) * 100) 
       : 100; // 100% if no hospitals have reached expiry yet
 
-    return { total, expired: expiredCount, renewed: renewedCount, pendingRenewals, retentionRate };
+    const followUpsOverdue = filteredHospitals.filter(h => 
+      h.nextFollowUpDate && 
+      isBefore(parseISO(h.nextFollowUpDate), startOfDay(now)) &&
+      !h.reapplied
+    ).length;
+
+    const followUpsToday = filteredHospitals.filter(h => 
+      h.nextFollowUpDate && 
+      format(parseISO(h.nextFollowUpDate), 'yyyy-MM-dd') === format(now, 'yyyy-MM-dd') &&
+      !h.reapplied
+    ).length;
+
+    const neverCalledCount = filteredHospitals.filter(h => {
+      const hospitalInteractions = interactions.filter(i => i.hospitalId === h.id);
+      return hospitalInteractions.length === 0;
+    }).length;
+
+    const neverEverConnectedCount = filteredHospitals.filter(h => {
+      const hospitalInteractions = interactions.filter(i => i.hospitalId === h.id);
+      return hospitalInteractions.length > 0 && !hospitalInteractions.some(i => i.result === 'Connected');
+    }).length;
+
+    return { 
+      total, 
+      expired: expiredCount, 
+      renewed: renewedCount, 
+      pendingRenewals, 
+      retentionRate,
+      followUpsOverdue,
+      followUpsToday,
+      neverCalled: neverCalledCount,
+      neverEverConnected: neverEverConnectedCount
+    };
   }, [filteredHospitals, now]);
+
+  const followUpQueue = useMemo(() => {
+    return filteredHospitals
+      .filter(h => h.nextFollowUpDate && !h.reapplied)
+      .sort((a, b) => parseISO(a.nextFollowUpDate!).getTime() - parseISO(b.nextFollowUpDate!).getTime())
+      .slice(0, 5);
+  }, [filteredHospitals]);
+
+  const pendingVerifications = useMemo(() => {
+    return interactions.filter(i => i.verificationStatus === 'Pending');
+  }, [interactions]);
+
+  const teamPerformance = useMemo(() => {
+    return users.map(user => {
+      const assignedHospitals = filteredHospitals.filter(h => h.assignedTo === user.uid);
+      
+      const notContacted = assignedHospitals.filter(h => {
+        const hInteractions = interactions.filter(i => i.hospitalId === h.id);
+        return hInteractions.length === 0;
+      }).length;
+      
+      const neverConnected = assignedHospitals.filter(h => {
+        const hInteractions = interactions.filter(i => i.hospitalId === h.id);
+        return hInteractions.length > 0 && !hInteractions.some(i => i.result === 'Connected');
+      }).length;
+      
+      const connected = assignedHospitals.filter(h => {
+        const hInteractions = interactions.filter(i => i.hospitalId === h.id);
+        return hInteractions.some(i => i.result === 'Connected');
+      }).length;
+      
+      const renewedCount = assignedHospitals.filter(h => h.reapplied).length;
+      const pendingCount = assignedHospitals.filter(h => !h.reapplied).length;
+
+      const conversionRate = assignedHospitals.length > 0 
+        ? Math.round((renewedCount / assignedHospitals.length) * 100) 
+        : 0;
+
+      return {
+        ...user,
+        assignedCount: assignedHospitals.length,
+        notContacted,
+        neverConnected,
+        connected,
+        renewedCount,
+        pendingCount,
+        conversionRate
+      };
+    }).sort((a, b) => b.renewedCount - a.renewedCount);
+  }, [users, filteredHospitals, interactions]);
 
   const trendData = useMemo(() => {
     const timeLabels = [];
@@ -296,6 +388,44 @@ export const Dashboard = memo(function Dashboard({ hospitals, interactions, appl
       .sort((a, b) => b.value - a.value);
   }, [filteredInteractions, filteredHospitals]);
 
+  const conversionStats = useMemo(() => {
+    const renewedHospitals = filteredHospitals.filter(h => h.reapplied && h.renewalApplicationDate);
+    
+    let convertedAfterInteraction = 0;
+    let totalInteractionsForRenewed = 0;
+
+    renewedHospitals.forEach(h => {
+      const renewalDate = parseISO(h.renewalApplicationDate!);
+      const hospitalInteractions = interactions.filter(i => 
+        i.hospitalId === h.id && 
+        i.result === 'Connected' &&
+        isBefore(parseISO(i.timestamp), renewalDate)
+      );
+
+      if (hospitalInteractions.length > 0) {
+        convertedAfterInteraction++;
+        totalInteractionsForRenewed += hospitalInteractions.length;
+      }
+    });
+
+    const totalRenewed = renewedHospitals.length;
+    const rate = totalRenewed > 0 ? Math.round((convertedAfterInteraction / totalRenewed) * 100) : 0;
+    const avg = convertedAfterInteraction > 0 ? Number((totalInteractionsForRenewed / convertedAfterInteraction).toFixed(1)) : 0;
+
+    return { 
+      totalRenewed, 
+      convertedAfterInteraction, 
+      organicRenewals: totalRenewed - convertedAfterInteraction,
+      rate, 
+      avgInteractions: avg
+    };
+  }, [filteredHospitals, interactions]);
+
+  const efficacyData = useMemo(() => [
+    { name: 'Effort Converted', value: conversionStats.convertedAfterInteraction },
+    { name: 'Organic Renewal', value: conversionStats.organicRenewals },
+  ], [conversionStats]);
+
   const COLORS = ['#1c1917', '#44403c', '#78716c', '#a8a29e', '#d6d3d1'];
   const RENEWAL_COLORS = ['#10b981', '#f43f5e'];
   const BREAKDOWN_COLORS = ['#3b82f6', '#f97316', '#d6d3d1'];
@@ -324,7 +454,11 @@ export const Dashboard = memo(function Dashboard({ hospitals, interactions, appl
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <header>
           <h2 className="text-3xl font-serif font-bold text-stone-900">Dashboard</h2>
-          <p className="text-stone-500">Manager's eagle eye view of compliance and retention.</p>
+          <p className="text-stone-500">
+            {filteredHospitals.length !== hospitals.length 
+              ? `Analyzing ${filteredHospitals.length} filtered leads out of ${hospitals.length}`
+              : "Manager's eagle eye view of compliance and retention."}
+          </p>
         </header>
         
         <div className="flex items-center gap-2">
@@ -340,11 +474,12 @@ export const Dashboard = memo(function Dashboard({ hospitals, interactions, appl
           >
             <FileText className="w-4 h-4" /> Download Dashboard Summary
           </button>
-          {(filterUser || filterState || filterDateStart || filterDateEnd) && (
+          {(filterUser || filterState || filterBatch !== 'all' || filterDateStart || filterDateEnd) && (
             <button 
               onClick={() => {
                 setFilterUser('');
                 setFilterState('');
+                setFilterBatch('all');
                 setFilterDateStart('');
                 setFilterDateEnd('');
               }}
@@ -357,7 +492,7 @@ export const Dashboard = memo(function Dashboard({ hospitals, interactions, appl
       </div>
 
       {/* Filters / Slicers */}
-      <div className="bg-white p-6 rounded-3xl border border-stone-200 shadow-sm grid grid-cols-1 md:grid-cols-4 gap-6">
+      <div className="bg-white p-6 rounded-3xl border border-stone-200 shadow-sm grid grid-cols-1 md:grid-cols-5 gap-6">
         <div>
           <label className="block text-[10px] font-bold text-stone-400 uppercase mb-1">Team Member</label>
           <select
@@ -385,6 +520,18 @@ export const Dashboard = memo(function Dashboard({ hospitals, interactions, appl
           </select>
         </div>
         <div>
+          <label className="block text-[10px] font-bold text-stone-400 uppercase mb-1">Lead Batch</label>
+          <select
+            className="w-full p-2.5 bg-stone-50 border-none rounded-xl text-xs focus:ring-2 focus:ring-stone-200"
+            value={filterBatch}
+            onChange={(e) => setFilterBatch(e.target.value as any)}
+          >
+            <option value="all">Total Dataset</option>
+            <option value="historical">2023-25 Batch</option>
+            <option value="upcoming">2026 Batch</option>
+          </select>
+        </div>
+        <div>
           <label className="block text-[10px] font-bold text-stone-400 uppercase mb-1">Expiry From</label>
           <input
             type="date"
@@ -407,9 +554,16 @@ export const Dashboard = memo(function Dashboard({ hospitals, interactions, appl
       {/* Quick Stats */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         {[
-          { label: 'Total Hospitals', value: stats.total, icon: TrendingUp, color: 'text-stone-600' },
+          { label: filterUser || filterState || filterBatch !== 'all' || filterDateStart || filterDateEnd ? 'Filtered Leads' : 'Total Hospitals', value: stats.total, icon: TrendingUp, color: 'text-stone-600' },
           { label: 'Renewed', value: stats.renewed, icon: CheckCircle2, color: 'text-emerald-500' },
-          { label: 'Pending Renewals', value: stats.pendingRenewals, icon: Clock, color: 'text-amber-500' },
+          { 
+            label: 'Follow-ups', 
+            value: stats.followUpsToday, 
+            icon: Clock, 
+            color: 'text-amber-600', 
+            sub: stats.followUpsOverdue > 0 ? `${stats.followUpsOverdue} Overdue` : 'All caught up',
+            subColor: stats.followUpsOverdue > 0 ? 'text-red-500' : 'text-emerald-500'
+          },
           { label: 'Retention Rate', value: `${stats.retentionRate}%`, icon: CheckCircle2, color: 'text-blue-500' },
         ].map((stat, i) => (
           <div key={i} className="bg-white p-6 rounded-3xl border border-stone-200 shadow-sm">
@@ -420,13 +574,126 @@ export const Dashboard = memo(function Dashboard({ hospitals, interactions, appl
             </div>
             <p className="text-stone-500 text-sm font-medium">{stat.label}</p>
             <p className="text-3xl font-serif font-bold text-stone-900 mt-1">{stat.value}</p>
+            {stat.sub && (
+              <p className={cn("text-[10px] uppercase font-bold mt-1", (stat as any).subColor || 'text-stone-400')}>
+                {stat.sub}
+              </p>
+            )}
           </div>
         ))}
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+      {/* Engagement Gap Analysis */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <div className="bg-white p-6 rounded-3xl border border-stone-200 shadow-sm relative overflow-hidden group">
+          <div className="absolute top-0 right-0 w-24 h-24 bg-stone-50 rounded-full -mr-12 -mt-12 transition-transform group-hover:scale-110" />
+          <div className="relative">
+            <div className="w-10 h-10 bg-amber-50 rounded-xl flex items-center justify-center text-amber-600 mb-4">
+              <PhoneOff className="w-5 h-5" />
+            </div>
+            <p className="text-stone-500 text-xs font-bold uppercase tracking-wider">Never Contacted</p>
+            <div className="flex items-baseline gap-2 mt-1">
+              <p className="text-3xl font-serif font-bold text-stone-900">{stats.neverCalled}</p>
+              <p className="text-xs text-stone-400 font-medium">hospitals</p>
+            </div>
+            <p className="text-[10px] text-stone-400 mt-2 leading-relaxed italic">
+              These facilities have no recorded interactions in our system.
+            </p>
+          </div>
+        </div>
+
+        <div className="bg-white p-6 rounded-3xl border border-stone-200 shadow-sm relative overflow-hidden group">
+          <div className="absolute top-0 right-0 w-24 h-24 bg-red-50/30 rounded-full -mr-12 -mt-12 transition-transform group-hover:scale-110" />
+          <div className="relative">
+            <div className="w-10 h-10 bg-red-50 rounded-xl flex items-center justify-center text-red-600 mb-4">
+              <Ban className="w-5 h-5" />
+            </div>
+            <p className="text-stone-500 text-xs font-bold uppercase tracking-wider">Never Connected</p>
+            <div className="flex items-baseline gap-2 mt-1">
+              <p className="text-3xl font-serif font-bold text-stone-900">{stats.neverEverConnected}</p>
+              <p className="text-xs text-stone-400 font-medium">hospitals</p>
+            </div>
+            <p className="text-[10px] text-stone-400 mt-2 leading-relaxed italic">
+              Contact attempted multiple times, but never successfully reached a person.
+            </p>
+          </div>
+        </div>
+
+        <div className="bg-stone-900 p-6 rounded-3xl shadow-sm relative overflow-hidden group">
+          <div className="absolute top-0 right-0 w-32 h-32 bg-white/5 rounded-full -mr-16 -mt-16" />
+          <div className="relative">
+            <div className="w-10 h-10 bg-white/10 rounded-xl flex items-center justify-center text-white mb-4">
+              <Users className="w-5 h-5" />
+            </div>
+            <p className="text-white/60 text-xs font-bold uppercase tracking-wider">Untapped Opportunity</p>
+            <div className="flex items-baseline gap-2 mt-1">
+              <p className="text-3xl font-serif font-bold text-white">
+                {Math.round(((stats.neverCalled + stats.neverEverConnected) / stats.total) * 100)}%
+              </p>
+              <p className="text-xs text-white/40 font-medium">of dataset</p>
+            </div>
+            <p className="text-[10px] text-white/40 mt-2 leading-relaxed">
+              Combined percentage of leads that haven't been successfully engaged yet.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+        {/* Verification Alert for Admins */}
+        {pendingVerifications.length > 0 && (
+          <div className="lg:col-span-3 bg-amber-50 p-6 rounded-3xl border border-amber-200 shadow-sm flex items-center justify-between animate-in fade-in slide-in-from-top-4 duration-500">
+            <div className="flex items-center gap-4">
+              <div className="w-12 h-12 bg-white rounded-2xl flex items-center justify-center shadow-sm text-amber-600">
+                <AlertCircle className="w-6 h-6" />
+              </div>
+              <div>
+                <h4 className="text-stone-900 font-bold">Verification Required</h4>
+                <p className="text-stone-600 text-sm">{pendingVerifications.length} reapplication details are waiting for admin approval.</p>
+              </div>
+            </div>
+            <button 
+              onClick={() => setActiveTab?.('verification')}
+              className="px-6 py-2 bg-stone-900 text-white rounded-xl text-sm font-bold hover:bg-stone-800 transition-colors shrink-0"
+            >
+              Review Now
+            </button>
+          </div>
+        )}
+
+        {/* Follow-up Queue */}
+        <div className="lg:col-span-1 bg-white p-8 rounded-3xl border border-stone-200 shadow-sm flex flex-col">
+          <div className="flex items-center justify-between mb-6">
+            <h3 className="text-lg font-serif font-bold text-stone-900">Follow-up Queue</h3>
+            <span className="px-2 py-1 bg-amber-100 text-amber-700 text-[10px] font-bold rounded-lg uppercase">Next 5</span>
+          </div>
+          <div className="space-y-4 flex-1">
+            {followUpQueue.length > 0 ? (
+              followUpQueue.map(h => (
+                <div key={h.id} className="p-4 bg-stone-50 rounded-2xl border border-stone-100 hover:border-stone-200 transition-colors">
+                  <p className="text-sm font-bold text-stone-900 truncate">{h.name}</p>
+                  <div className="flex items-center justify-between mt-2">
+                    <div className="flex items-center gap-1 text-[10px] font-bold text-stone-400">
+                      <Clock className="w-3 h-3" />
+                      {format(parseISO(h.nextFollowUpDate!), 'MMM d')}
+                    </div>
+                    {isBefore(parseISO(h.nextFollowUpDate!), startOfDay(now)) && (
+                      <span className="text-[8px] bg-red-100 text-red-600 px-1.5 py-0.5 rounded font-black uppercase">Overdue</span>
+                    )}
+                  </div>
+                </div>
+              ))
+            ) : (
+              <div className="flex flex-col items-center justify-center h-full text-center py-10">
+                <CheckCircle2 className="w-10 h-10 text-stone-200 mb-2" />
+                <p className="text-stone-400 text-sm italic">No upcoming follow-ups</p>
+              </div>
+            )}
+          </div>
+        </div>
+
         {/* Renewal Status */}
-        <div className="bg-white p-8 rounded-3xl border border-stone-200 shadow-sm">
+        <div className="lg:col-span-2 bg-white p-8 rounded-3xl border border-stone-200 shadow-sm">
           <h3 className="text-lg font-serif font-bold text-stone-900 mb-6">Renewal Status</h3>
           <div className="h-64">
             <ResponsiveContainer width="100%" height="100%">
@@ -482,6 +749,65 @@ export const Dashboard = memo(function Dashboard({ hospitals, interactions, appl
                 No migration data yet
               </div>
             )}
+          </div>
+        </div>
+
+        {/* Effort Efficacy Analysis */}
+        <div className="bg-white p-8 rounded-3xl border border-stone-200 shadow-sm lg:col-span-2">
+          <div className="flex items-center justify-between mb-6">
+            <div>
+              <h3 className="text-lg font-serif font-bold text-stone-900">Effort Efficacy Analysis</h3>
+              <p className="text-xs text-stone-500">Tracking hospitals that renewed after at least one successful team interaction.</p>
+            </div>
+            <div className="text-right">
+              <p className="text-2xl font-bold text-stone-900">{conversionStats.rate}%</p>
+              <p className="text-[10px] text-stone-400 font-bold uppercase">Conversion Rate</p>
+            </div>
+          </div>
+          
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-8 items-center">
+            <div className="h-48 md:col-span-1">
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie
+                    data={efficacyData}
+                    cx="50%"
+                    cy="50%"
+                    innerRadius={50}
+                    outerRadius={70}
+                    paddingAngle={5}
+                    dataKey="value"
+                  >
+                    <Cell fill="#1c1917" />
+                    <Cell fill="#d6d3d1" />
+                  </Pie>
+                  <Tooltip />
+                </PieChart>
+              </ResponsiveContainer>
+            </div>
+
+            <div className="md:col-span-2 grid grid-cols-2 gap-6">
+              <div className="p-4 bg-stone-50 rounded-2xl border border-stone-100/50">
+                <p className="text-[10px] font-bold text-stone-400 uppercase tracking-wider mb-1">Effort-Led Renewals</p>
+                <p className="text-2xl font-bold text-stone-900">{conversionStats.convertedAfterInteraction}</p>
+                <p className="text-[10px] text-emerald-600 font-bold mt-1">Confirmed Conversion</p>
+              </div>
+              <div className="p-4 bg-stone-50 rounded-2xl border border-stone-100/50">
+                <p className="text-[10px] font-bold text-stone-400 uppercase tracking-wider mb-1">Organic Renewals</p>
+                <p className="text-2xl font-bold text-stone-900">{conversionStats.organicRenewals}</p>
+                <p className="text-[10px] text-stone-400 font-bold mt-1">Direct Renewals</p>
+              </div>
+              <div className="p-4 bg-stone-50 rounded-2xl border border-stone-100/50">
+                <p className="text-[10px] font-bold text-stone-400 uppercase tracking-wider mb-1">Avg. Touches to Renew</p>
+                <p className="text-2xl font-bold text-stone-900">{conversionStats.avgInteractions}</p>
+                <p className="text-[10px] text-stone-400 font-bold mt-1">Connected interactions</p>
+              </div>
+              <div className="p-4 bg-stone-900 rounded-2xl shadow-lg shadow-stone-200">
+                <p className="text-[10px] font-bold text-stone-400 uppercase tracking-wider mb-1">Total Effort-Led</p>
+                <p className="text-2xl font-bold text-white">{conversionStats.convertedAfterInteraction}</p>
+                <p className="text-[10px] text-stone-400 font-bold mt-1">Out of {conversionStats.totalRenewed} renewals</p>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -931,6 +1257,91 @@ export const Dashboard = memo(function Dashboard({ hospitals, interactions, appl
               </tbody>
             </table>
           </div>
+        </div>
+      </div>
+
+      {/* Team Performance Leaderboard */}
+      <div className="bg-white p-8 rounded-3xl border border-stone-200 shadow-sm mt-8">
+        <div className="flex items-center justify-between mb-8">
+          <div>
+            <h3 className="text-xl font-serif font-bold text-stone-900">Team Performance</h3>
+            <p className="text-stone-500 text-sm">Real-time productivity and conversion metrics by team member.</p>
+          </div>
+          <div className="px-4 py-2 bg-stone-50 rounded-xl border border-stone-100 flex items-center gap-2">
+            <Users className="w-4 h-4 text-stone-400" />
+            <span className="text-xs font-bold text-stone-600">{users.length} Members</span>
+          </div>
+        </div>
+
+        <div className="overflow-x-auto">
+          <table className="w-full text-left">
+            <thead>
+              <tr className="border-b border-stone-100 pb-4">
+                <th className="py-4 text-[10px] font-bold text-stone-400 uppercase tracking-wider pl-4">Team Member</th>
+                <th className="py-4 text-[10px] font-bold text-stone-400 uppercase tracking-wider text-center">Assigned</th>
+                <th className="py-4 text-[10px] font-bold text-stone-400 uppercase tracking-wider text-center">Not Contacted</th>
+                <th className="py-4 text-[10px] font-bold text-stone-400 uppercase tracking-wider text-center">Never Connected</th>
+                <th className="py-4 text-[10px] font-bold text-stone-400 uppercase tracking-wider text-center">Connected</th>
+                <th className="py-4 text-[10px] font-bold text-stone-400 uppercase tracking-wider text-center">Renewed (Leads)</th>
+                <th className="py-4 text-[10px] font-bold text-stone-400 uppercase tracking-wider text-center">Pending (Leads)</th>
+                <th className="py-4 text-[10px] font-bold text-stone-400 uppercase tracking-wider text-right pr-4">Conv. Rate</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-stone-50">
+              {teamPerformance.map((member) => (
+                <tr key={member.uid} className="hover:bg-stone-50 transition-colors group">
+                  <td className="py-5 pl-4">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 bg-stone-100 rounded-xl flex items-center justify-center group-hover:bg-white transition-colors border border-transparent group-hover:border-stone-100">
+                        <span className="text-sm font-bold text-stone-500">{member.name.charAt(0)}</span>
+                      </div>
+                      <div>
+                        <p className="text-sm font-bold text-stone-900">{member.name}</p>
+                        <p className="text-[10px] text-stone-400 font-medium uppercase">{member.role}</p>
+                      </div>
+                    </div>
+                  </td>
+                  <td className="py-5 text-center font-mono text-sm text-stone-600">{member.assignedCount}</td>
+                  <td className="py-5 text-center font-mono text-sm text-stone-400">{member.notContacted}</td>
+                  <td className="py-5 text-center">
+                    <div className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-red-50 text-red-600 rounded-lg text-xs font-bold">
+                      <Ban className="w-3.5 h-3.5" />
+                      {member.neverConnected}
+                    </div>
+                  </td>
+                  <td className="py-5 text-center">
+                    <div className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-emerald-50 text-emerald-600 rounded-lg text-xs font-bold">
+                      <CheckCircle2 className="w-3.5 h-3.5" />
+                      {member.connected}
+                    </div>
+                  </td>
+                  <td className="py-5 text-center">
+                    <div className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-blue-50 text-blue-600 rounded-lg text-xs font-bold">
+                      <CheckCircle2 className="w-3.5 h-3.5" />
+                      {member.renewedCount}
+                    </div>
+                  </td>
+                  <td className="py-5 text-center">
+                    <div className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-stone-50 text-stone-500 rounded-lg text-xs font-bold">
+                      <Clock className="w-3.5 h-3.5" />
+                      {member.pendingCount}
+                    </div>
+                  </td>
+                  <td className="py-5 text-right pr-4">
+                    <div className="flex items-center justify-end gap-3 font-mono">
+                      <div className="w-20 h-1.5 bg-stone-100 rounded-full overflow-hidden">
+                        <div 
+                          className="h-full bg-stone-900 rounded-full transition-all duration-1000" 
+                          style={{ width: `${member.conversionRate}%` }}
+                        />
+                      </div>
+                      <span className="text-sm font-bold text-stone-900 w-10 text-right">{member.conversionRate}%</span>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       </div>
     </div>

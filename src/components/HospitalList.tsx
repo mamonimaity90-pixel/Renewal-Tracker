@@ -20,9 +20,10 @@ import {
   Loader2,
   ChevronDown,
   AlertCircle,
-  Download
+  Download,
+  Clock
 } from 'lucide-react';
-import { format, parseISO, isBefore, isAfter } from 'date-fns';
+import { format, parseISO, isBefore, isAfter, startOfDay, differenceInDays } from 'date-fns';
 import Papa from 'papaparse';
 import { db, auth } from '../firebase';
 import { collection, addDoc, updateDoc, doc, writeBatch, serverTimestamp } from 'firebase/firestore';
@@ -54,12 +55,31 @@ export const HospitalList = memo(function HospitalList({ hospitals, users, inter
   const [filterUsers, setFilterUsers] = useState<string[]>([]);
   const [filterStates, setFilterStates] = useState<string[]>([]);
   const [filterRenewal, setFilterRenewal] = useState<'all' | 'renewed' | 'pending'>('all');
-  const [filterConnection, setFilterConnection] = useState<'all' | 'connected' | 'not-connected' | 'none'>('all');
+  const [filterConnection, setFilterConnection] = useState<'all' | 'connected' | 'not-connected' | 'none' | 'never-ever-connected'>('all');
+  const [filterBatch, setFilterBatch] = useState<'all' | 'historical' | 'upcoming'>('all');
+  const [filterEffortLed, setFilterEffortLed] = useState(false);
   const [filterDateStart, setFilterDateStart] = useState('');
   const [filterDateEnd, setFilterDateEnd] = useState('');
+  const [filterFollowUp, setFilterFollowUp] = useState<'all' | 'today' | 'overdue' | 'upcoming'>('all');
   const [activeHospitalId, setActiveHospitalId] = useState<string | null>(null);
 
   const availableStates = useMemo(() => Array.from(new Set(hospitals.map(h => h.state))).sort(), [hospitals]);
+
+  const effortLedHospitals = useMemo(() => {
+    const set = new Set<string>();
+    hospitals.forEach(h => {
+      if (h.reapplied && h.renewalApplicationDate) {
+        const renewalDate = parseISO(h.renewalApplicationDate);
+        const hospitalInteractions = interactions.filter(i => i.hospitalId === h.id);
+        const hasInteractionBeforeRenewal = hospitalInteractions.some(i => 
+          i.result === 'Connected' &&
+          isBefore(parseISO(i.timestamp), renewalDate)
+        );
+        if (hasInteractionBeforeRenewal) set.add(h.id);
+      }
+    });
+    return set;
+  }, [hospitals, interactions]);
 
   const filteredHospitals = useMemo(() => {
     return hospitals
@@ -74,6 +94,13 @@ export const HospitalList = memo(function HospitalList({ hospitals, users, inter
         const matchesUser = filterUsers.length === 0 || filterUsers.includes(h.assignedTo || '');
         const matchesState = filterStates.length === 0 || filterStates.includes(h.state);
         
+        let matchesBatch = true;
+        if (filterBatch !== 'all') {
+          const year = parseISO(h.expiryDate).getFullYear();
+          if (filterBatch === 'historical') matchesBatch = year < 2026;
+          if (filterBatch === 'upcoming') matchesBatch = year >= 2026;
+        }
+
         const matchesRenewal = 
           filterRenewal === 'all' || 
           (filterRenewal === 'renewed' && h.reapplied) || 
@@ -88,6 +115,9 @@ export const HospitalList = memo(function HospitalList({ hospitals, users, inter
 
           if (filterConnection === 'none') {
             matchesConnection = hospitalInteractions.length === 0;
+          } else if (filterConnection === 'never-ever-connected') {
+            // Has interactions but none of them are "Connected"
+            matchesConnection = hospitalInteractions.length > 0 && !hospitalInteractions.some(i => i.result === 'Connected');
           } else if (filterConnection === 'connected') {
             matchesConnection = latestInteraction?.result === 'Connected';
           } else if (filterConnection === 'not-connected') {
@@ -102,7 +132,24 @@ export const HospitalList = memo(function HospitalList({ hospitals, users, inter
           if (filterDateEnd && isAfter(expiry, parseISO(filterDateEnd))) matchesDate = false;
         }
 
-        return matchesSearch && matchesUser && matchesState && matchesRenewal && matchesConnection && matchesDate;
+        const matchesEffort = !filterEffortLed || effortLedHospitals.has(h.id);
+
+        let matchesFollowUp = true;
+        if (filterFollowUp !== 'all' && h.nextFollowUpDate) {
+          const fuDate = parseISO(h.nextFollowUpDate);
+          const today = startOfDay(new Date());
+          if (filterFollowUp === 'today') {
+            matchesFollowUp = format(fuDate, 'yyyy-MM-dd') === format(new Date(), 'yyyy-MM-dd');
+          } else if (filterFollowUp === 'overdue') {
+            matchesFollowUp = isBefore(fuDate, today);
+          } else if (filterFollowUp === 'upcoming') {
+            matchesFollowUp = isAfter(fuDate, today) || format(fuDate, 'yyyy-MM-dd') === format(new Date(), 'yyyy-MM-dd');
+          }
+        } else if (filterFollowUp !== 'all' && !h.nextFollowUpDate) {
+          matchesFollowUp = false;
+        }
+
+        return matchesSearch && matchesUser && matchesState && matchesBatch && matchesRenewal && matchesConnection && matchesDate && matchesEffort && matchesFollowUp;
       })
       .sort((a, b) => {
         const valA = a[sortField] || '';
@@ -111,7 +158,7 @@ export const HospitalList = memo(function HospitalList({ hospitals, users, inter
         if (valA > valB) return sortOrder === 'asc' ? 1 : -1;
         return 0;
       });
-  }, [hospitals, interactions, search, filterUsers, filterStates, filterRenewal, filterConnection, filterDateStart, filterDateEnd, sortField, sortOrder]);
+  }, [hospitals, interactions, search, filterUsers, filterStates, filterRenewal, filterConnection, filterDateStart, filterDateEnd, filterEffortLed, filterFollowUp, sortField, sortOrder, effortLedHospitals]);
 
   const totalPages = Math.ceil(filteredHospitals.length / ITEMS_PER_PAGE);
   const paginatedHospitals = filteredHospitals.slice(
@@ -207,7 +254,11 @@ export const HospitalList = memo(function HospitalList({ hospitals, users, inter
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <header>
           <h2 className="text-3xl font-serif font-bold text-stone-900">Hospitals</h2>
-          <p className="text-stone-500">Manage and track hospital compliance status ({hospitals.length} total).</p>
+          <p className="text-stone-500">
+            {filteredHospitals.length !== hospitals.length 
+              ? `Showing ${filteredHospitals.length} leads out of ${hospitals.length} total`
+              : `Manage and track hospital compliance status (${hospitals.length} total)`}
+          </p>
         </header>
         {isAdmin && (
           <div className="flex gap-3">
@@ -297,6 +348,8 @@ export const HospitalList = memo(function HospitalList({ hospitals, users, inter
                   setFilterStates([]);
                   setFilterRenewal('all');
                   setFilterConnection('all');
+                  setFilterEffortLed(false);
+                  setFilterFollowUp('all');
                   setFilterDateStart('');
                   setFilterDateEnd('');
                   setCurrentPage(1);
@@ -328,7 +381,7 @@ export const HospitalList = memo(function HospitalList({ hospitals, users, inter
           </div>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-4 pt-2 border-t border-stone-100">
+        <div className="grid grid-cols-1 md:grid-cols-4 lg:grid-cols-8 gap-4 pt-2 border-t border-stone-100">
           <div>
             <label className="block text-[10px] font-bold text-stone-400 uppercase mb-1">Assigned To</label>
             <MultiSelect
@@ -348,31 +401,71 @@ export const HospitalList = memo(function HospitalList({ hospitals, users, inter
             />
           </div>
           <div>
-            <label className="block text-[10px] font-bold text-stone-400 uppercase mb-1">Renewal Status</label>
+            <label className="block text-[10px] font-bold text-stone-400 uppercase mb-1">Status</label>
             <select
               className="w-full p-2 bg-stone-50 border-none rounded-lg text-xs focus:ring-1 focus:ring-stone-200"
               value={filterRenewal}
               onChange={(e) => setFilterRenewal(e.target.value as any)}
             >
-              <option value="all">All Status</option>
+              <option value="all">All Renewal Status</option>
               <option value="renewed">Renewed</option>
               <option value="pending">Pending</option>
             </select>
           </div>
           <div>
-            <label className="block text-[10px] font-bold text-stone-400 uppercase mb-1">Call Status</label>
+            <label className="block text-[10px] font-bold text-stone-400 uppercase mb-1">Latest Call Status</label>
             <select
               className="w-full p-2 bg-stone-50 border-none rounded-lg text-xs focus:ring-1 focus:ring-stone-200"
               value={filterConnection}
               onChange={(e) => setFilterConnection(e.target.value as any)}
             >
-              <option value="all">All Calls</option>
-              <option value="connected">Connected</option>
-              <option value="not-connected">Not Connected</option>
-              <option value="none">No Calls Yet</option>
+              <option value="all">All Status</option>
+              <option value="connected">Connected (Last)</option>
+              <option value="not-connected">Not Connected (Last)</option>
+              <option value="none">Never Called</option>
+              <option value="never-ever-connected">Never Connected</option>
             </select>
           </div>
           <div>
+            <label className="block text-[10px] font-bold text-stone-400 uppercase mb-1">Follow-up</label>
+            <select
+              className="w-full p-2 bg-stone-50 border-none rounded-lg text-xs focus:ring-1 focus:ring-stone-200"
+              value={filterFollowUp}
+              onChange={(e) => setFilterFollowUp(e.target.value as any)}
+            >
+              <option value="all">All Schedule</option>
+              <option value="today">Today</option>
+              <option value="overdue">Overdue</option>
+              <option value="upcoming">Upcoming</option>
+            </select>
+          </div>
+          <div>
+            <label className="block text-[10px] font-bold text-stone-400 uppercase mb-1">Effort Only</label>
+            <button
+              onClick={() => setFilterEffortLed(!filterEffortLed)}
+              className={cn(
+                "w-full p-2 rounded-lg text-xs font-bold transition-all border",
+                filterEffortLed 
+                  ? "bg-stone-900 border-stone-900 text-white" 
+                  : "bg-white border-stone-200 text-stone-400 hover:border-stone-400"
+              )}
+            >
+              Effort-Led Only
+            </button>
+          </div>
+          <div>
+            <label className="block text-[10px] font-bold text-stone-400 uppercase mb-1">Lead Batch</label>
+            <select
+              className="w-full p-2 bg-stone-50 border-none rounded-lg text-xs focus:ring-1 focus:ring-stone-200"
+              value={filterBatch}
+              onChange={(e) => setFilterBatch(e.target.value as any)}
+            >
+              <option value="all">Total Dataset</option>
+              <option value="historical">2023-25 Batch</option>
+              <option value="upcoming">2026 Batch</option>
+            </select>
+          </div>
+          <div className="lg:col-span-1">
             <label className="block text-[10px] font-bold text-stone-400 uppercase mb-1">Expiry From</label>
             <input
               type="date"
@@ -416,10 +509,9 @@ export const HospitalList = memo(function HospitalList({ hospitals, users, inter
                   </button>
                 </th>
                 <th className="p-4 text-xs font-serif italic text-stone-400 uppercase tracking-wider">Contact Details</th>
-                <th className="p-4 text-xs font-serif italic text-stone-400 uppercase tracking-wider">App No</th>
                 <th className="p-4 text-xs font-serif italic text-stone-400 uppercase tracking-wider">
-                  <button onClick={() => handleSort('state')} className="flex items-center gap-1">
-                    Location <ArrowUpDown className="w-3 h-3" />
+                  <button onClick={() => handleSort('nextFollowUpDate')} className="flex items-center gap-1">
+                    Follow-up <ArrowUpDown className="w-3 h-3" />
                   </button>
                 </th>
                 <th className="p-4 text-xs font-serif italic text-stone-400 uppercase tracking-wider text-center">
@@ -483,9 +575,6 @@ export const HospitalList = memo(function HospitalList({ hospitals, users, inter
                     </div>
                   </td>
                   <td className="p-4 text-sm text-stone-600">
-                    {hospital.applicationNo}
-                  </td>
-                  <td className="p-4">
                     <div className="flex flex-col gap-1 text-sm text-stone-600">
                       <div className="flex items-center gap-1">
                         <MapPin className="w-3 h-3" />
@@ -493,6 +582,21 @@ export const HospitalList = memo(function HospitalList({ hospitals, users, inter
                       </div>
                       <span className="text-xs text-stone-400 ml-4">{hospital.pincode}</span>
                     </div>
+                  </td>
+                  <td className="p-4">
+                    {hospital.nextFollowUpDate ? (
+                      <div className={cn(
+                        "flex items-center gap-1 text-xs font-bold px-2 py-1 rounded-lg border",
+                        isBefore(parseISO(hospital.nextFollowUpDate), startOfDay(new Date())) 
+                          ? "bg-red-50 text-red-700 border-red-100" 
+                          : "bg-amber-50 text-amber-700 border-amber-100"
+                      )}>
+                        <Clock className="w-3 h-3" />
+                        {format(parseISO(hospital.nextFollowUpDate), 'MMM d, yyyy')}
+                      </div>
+                    ) : (
+                      <span className="text-[10px] text-stone-300 uppercase font-black italic">No Schedule</span>
+                    )}
                   </td>
                   <td className="p-4 text-center">
                     <div className="inline-flex items-center gap-1 px-2 py-1 bg-stone-100 rounded-lg text-xs font-mono">
@@ -508,12 +612,19 @@ export const HospitalList = memo(function HospitalList({ hospitals, users, inter
                   </td>
                   <td className="p-4">
                     <div className="flex flex-col gap-1">
-                      <span className={cn(
-                        "text-xs font-medium",
-                        hospital.reapplied ? "text-emerald-600" : "text-stone-400"
-                      )}>
-                        {hospital.reapplied ? 'Yes' : 'No'}
-                      </span>
+                      <div className="flex items-center gap-2">
+                        <span className={cn(
+                          "text-xs font-medium",
+                          hospital.reapplied ? "text-emerald-600" : "text-stone-400"
+                        )}>
+                          {hospital.reapplied ? 'Yes' : 'No'}
+                        </span>
+                        {effortLedHospitals.has(hospital.id) && (
+                          <span className="bg-emerald-100 text-emerald-700 text-[8px] font-black uppercase px-1.5 py-0.5 rounded-md border border-emerald-200 tracking-tighter" title="Renewed after team engagement">
+                            Effort-Led
+                          </span>
+                        )}
+                      </div>
                       {hospital.reapplied && (
                         <span className="text-[10px] text-stone-400 italic">
                           {hospital.reappliedProgram}
@@ -788,7 +899,16 @@ function LogInteractionModal({ hospital, interactions, users, onClose }: {
         delete dataToSave.remarks;
         delete dataToSave.followUpDate;
       }
+      
       await addDoc(collection(db, 'interactions'), dataToSave);
+
+      // Update hospital's next follow up date
+      if (formData.followUpDate) {
+        await updateDoc(doc(db, 'hospitals', hospital.id), {
+          nextFollowUpDate: new Date(formData.followUpDate).toISOString()
+        });
+      }
+
       onClose();
     } catch (error) {
       console.error('Failed to log interaction:', error);

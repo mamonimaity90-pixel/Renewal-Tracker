@@ -27,6 +27,7 @@ export interface Hospital {
   contactNumber?: string;
   alternateNumber?: string;
   designation?: string;
+  nextFollowUpDate?: string; // ISO string
 }
 
 export interface Interaction {
@@ -57,6 +58,7 @@ export interface Interaction {
   reapplied?: boolean;
   reapplicationProgram?: string;
   reapplicationNumber?: string;
+  reapplicationDate?: string;
   verificationStatus?: 'Pending' | 'Verified' | 'Rejected';
   verifiedBy?: string;
   verifiedAt?: string;

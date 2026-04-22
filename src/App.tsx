@@ -363,6 +363,7 @@ export default function App() {
           interactions={interactions} 
           applications={applications} 
           users={users}
+          setActiveTab={setActiveTab}
         />
       )}
       {activeTab === 'hospitals' && (

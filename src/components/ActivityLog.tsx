@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { Hospital, Interaction, User } from '../types';
-import { Phone, Mail, Users, Calendar, Search, Filter, Clock, ChevronRight } from 'lucide-react';
-import { format, parseISO, isWithinInterval, startOfDay, endOfDay } from 'date-fns';
+import { Phone, Mail, Users, Calendar, Search, Filter, Clock, ChevronRight, CheckCircle2 } from 'lucide-react';
+import { format, parseISO, isWithinInterval, startOfDay, endOfDay, isBefore } from 'date-fns';
 import { cn } from '../lib/utils';
 
 interface ActivityLogProps {
@@ -158,6 +158,15 @@ export function ActivityLog({ hospitals, interactions, users }: ActivityLogProps
                           "bg-red-100 text-red-700"
                         )}>
                           Verification: {log.verificationStatus}
+                        </span>
+                      )}
+                      {hospital?.reapplied && 
+                       hospital?.renewalApplicationDate && 
+                       log.result === 'Connected' &&
+                       isBefore(parseISO(log.timestamp), parseISO(hospital.renewalApplicationDate)) && (
+                        <span className="text-[10px] bg-stone-900 text-white font-black px-2 py-0.5 rounded-md uppercase tracking-wider flex items-center gap-1">
+                          <CheckCircle2 className="w-3 h-3 text-emerald-400" />
+                          Effort-Led Conversion
                         </span>
                       )}
                     </div>
