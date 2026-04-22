@@ -15,7 +15,7 @@ import {
   LabelList
 } from 'recharts';
 import { FileText, AlertCircle, CheckCircle2, Clock, TrendingUp, Filter, Search, X, ArrowUpDown, ChevronDown, Users, UserCheck, PhoneOff, Ban } from 'lucide-react';
-import { format, isAfter, isBefore, parseISO, differenceInDays, differenceInMonths, startOfDay } from 'date-fns';
+import { format, isAfter, isBefore, parseISO, differenceInDays, differenceInMonths, startOfDay, endOfDay, isWithinInterval } from 'date-fns';
 import { cn } from '../lib/utils';
 import { generateHospitalReport } from '../lib/reportGenerator';
 
@@ -36,6 +36,8 @@ export const Dashboard = memo(function Dashboard({ hospitals, interactions, appl
   const [filterBatch, setFilterBatch] = useState<'all' | 'historical' | 'upcoming'>('all');
   const [filterDateStart, setFilterDateStart] = useState('');
   const [filterDateEnd, setFilterDateEnd] = useState('');
+  const [effortDateStart, setEffortDateStart] = useState(format(new Date(), 'yyyy-MM-dd'));
+  const [effortDateEnd, setEffortDateEnd] = useState(format(new Date(), 'yyyy-MM-dd'));
   const [trendGranularity, setTrendGranularity] = useState<'month' | 'year'>('month');
   const [trendView, setTrendView] = useState<'count' | 'percent'>('count');
   const [expandedStates, setExpandedStates] = useState<Set<string>>(new Set());
@@ -143,12 +145,12 @@ export const Dashboard = memo(function Dashboard({ hospitals, interactions, appl
       !h.reapplied
     ).length;
 
-    const neverCalledCount = filteredHospitals.filter(h => {
+    const neverCalledCount = filteredHospitals.filter(h => !h.reapplied).filter(h => {
       const hospitalInteractions = interactions.filter(i => i.hospitalId === h.id);
       return hospitalInteractions.length === 0;
     }).length;
 
-    const neverEverConnectedCount = filteredHospitals.filter(h => {
+    const neverEverConnectedCount = filteredHospitals.filter(h => !h.reapplied).filter(h => {
       const hospitalInteractions = interactions.filter(i => i.hospitalId === h.id);
       return hospitalInteractions.length > 0 && !hospitalInteractions.some(i => i.result === 'Connected');
     }).length;
@@ -215,6 +217,30 @@ export const Dashboard = memo(function Dashboard({ hospitals, interactions, appl
       };
     }).sort((a, b) => b.renewedCount - a.renewedCount);
   }, [users, filteredHospitals, interactions]);
+
+  const dailyEffort = useMemo(() => {
+    const start = effortDateStart ? startOfDay(parseISO(effortDateStart)) : startOfDay(new Date());
+    const end = effortDateEnd ? endOfDay(parseISO(effortDateEnd)) : endOfDay(new Date());
+
+    return users.map(user => {
+      const userInteractions = interactions.filter(i => {
+        const logDate = parseISO(i.timestamp);
+        return i.userId === user.uid && isWithinInterval(logDate, { start, end });
+      });
+
+      const connected = userInteractions.filter(i => i.result === 'Connected').length;
+      const notConnected = userInteractions.filter(i => i.result === 'Not Connected').length;
+      const total = userInteractions.length;
+
+      return {
+        ...user,
+        total,
+        connected,
+        notConnected,
+        efficacy: total > 0 ? Math.round((connected / total) * 100) : 0
+      };
+    }).sort((a, b) => b.total - a.total);
+  }, [users, interactions, effortDateStart, effortDateEnd]);
 
   const trendData = useMemo(() => {
     const timeLabels = [];
@@ -591,13 +617,13 @@ export const Dashboard = memo(function Dashboard({ hospitals, interactions, appl
             <div className="w-10 h-10 bg-amber-50 rounded-xl flex items-center justify-center text-amber-600 mb-4">
               <PhoneOff className="w-5 h-5" />
             </div>
-            <p className="text-stone-500 text-xs font-bold uppercase tracking-wider">Never Contacted</p>
+            <p className="text-stone-500 text-xs font-bold uppercase tracking-wider">Never Contacted (Pending)</p>
             <div className="flex items-baseline gap-2 mt-1">
               <p className="text-3xl font-serif font-bold text-stone-900">{stats.neverCalled}</p>
               <p className="text-xs text-stone-400 font-medium">hospitals</p>
             </div>
             <p className="text-[10px] text-stone-400 mt-2 leading-relaxed italic">
-              These facilities have no recorded interactions in our system.
+              Unrenewed facilities with no recorded interactions in our system.
             </p>
           </div>
         </div>
@@ -608,13 +634,13 @@ export const Dashboard = memo(function Dashboard({ hospitals, interactions, appl
             <div className="w-10 h-10 bg-red-50 rounded-xl flex items-center justify-center text-red-600 mb-4">
               <Ban className="w-5 h-5" />
             </div>
-            <p className="text-stone-500 text-xs font-bold uppercase tracking-wider">Never Connected</p>
+            <p className="text-stone-500 text-xs font-bold uppercase tracking-wider">Never Connected (Pending)</p>
             <div className="flex items-baseline gap-2 mt-1">
               <p className="text-3xl font-serif font-bold text-stone-900">{stats.neverEverConnected}</p>
               <p className="text-xs text-stone-400 font-medium">hospitals</p>
             </div>
             <p className="text-[10px] text-stone-400 mt-2 leading-relaxed italic">
-              Contact attempted multiple times, but never successfully reached a person.
+              Unrenewed facilities where attempts were made but never successful.
             </p>
           </div>
         </div>
@@ -1260,12 +1286,12 @@ export const Dashboard = memo(function Dashboard({ hospitals, interactions, appl
         </div>
       </div>
 
-      {/* Team Performance Leaderboard */}
+      {/* Team Portfolio Status */}
       <div className="bg-white p-8 rounded-3xl border border-stone-200 shadow-sm mt-8">
         <div className="flex items-center justify-between mb-8">
           <div>
-            <h3 className="text-xl font-serif font-bold text-stone-900">Team Performance</h3>
-            <p className="text-stone-500 text-sm">Real-time productivity and conversion metrics by team member.</p>
+            <h3 className="text-xl font-serif font-bold text-stone-900">Lead Portfolio Status</h3>
+            <p className="text-stone-500 text-sm">Portfolio health and renewal progress by assigned team member.</p>
           </div>
           <div className="px-4 py-2 bg-stone-50 rounded-xl border border-stone-100 flex items-center gap-2">
             <Users className="w-4 h-4 text-stone-400" />
@@ -1340,6 +1366,94 @@ export const Dashboard = memo(function Dashboard({ hospitals, interactions, appl
                   </td>
                 </tr>
               ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Daily Interaction Effort */}
+      <div className="bg-white p-8 rounded-3xl border border-stone-200 shadow-sm mt-8">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-8">
+          <div>
+            <h3 className="text-xl font-serif font-bold text-stone-900">Daily Interaction Effort</h3>
+            <p className="text-stone-500 text-sm">Review call volume and connectivity outcomes within a specific timeframe.</p>
+          </div>
+          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2">
+              <label className="text-[10px] font-bold text-stone-400 uppercase">From</label>
+              <input 
+                type="date" 
+                value={effortDateStart} 
+                onChange={(e) => setEffortDateStart(e.target.value)}
+                className="p-2 bg-stone-50 border-none rounded-xl text-xs font-bold focus:ring-2 focus:ring-stone-200"
+              />
+            </div>
+            <div className="flex items-center gap-2">
+              <label className="text-[10px] font-bold text-stone-400 uppercase">To</label>
+              <input 
+                type="date" 
+                value={effortDateEnd} 
+                onChange={(e) => setEffortDateEnd(e.target.value)}
+                className="p-2 bg-stone-50 border-none rounded-xl text-xs font-bold focus:ring-2 focus:ring-stone-200"
+              />
+            </div>
+          </div>
+        </div>
+
+        <div className="overflow-x-auto">
+          <table className="w-full text-left">
+            <thead>
+              <tr className="border-b border-stone-100 pb-4">
+                <th className="py-4 text-[10px] font-bold text-stone-400 uppercase tracking-wider pl-4">Team Member</th>
+                <th className="py-4 text-[10px] font-bold text-stone-400 uppercase tracking-wider text-center">Total Interactions</th>
+                <th className="py-4 text-[10px] font-bold text-stone-400 uppercase tracking-wider text-center">Connected</th>
+                <th className="py-4 text-[10px] font-bold text-stone-400 uppercase tracking-wider text-center">Not Connected</th>
+                <th className="py-4 text-[10px] font-bold text-stone-400 uppercase tracking-wider text-right pr-4">Connectivity %</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-stone-50">
+              {dailyEffort.map((member) => (
+                <tr key={member.uid} className="hover:bg-stone-50 transition-colors group">
+                  <td className="py-5 pl-4">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 bg-stone-100 rounded-xl flex items-center justify-center">
+                        <span className="text-sm font-bold text-stone-500">{member.name.charAt(0)}</span>
+                      </div>
+                      <div>
+                        <p className="text-sm font-bold text-stone-900">{member.name}</p>
+                        <p className="text-[10px] text-stone-400 font-medium uppercase">{member.role}</p>
+                      </div>
+                    </div>
+                  </td>
+                  <td className="py-5 text-center font-mono text-sm text-stone-600">{member.total}</td>
+                  <td className="py-5 text-center">
+                    <div className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-emerald-50 text-emerald-600 rounded-lg text-xs font-bold border border-emerald-100">
+                      {member.connected}
+                    </div>
+                  </td>
+                  <td className="py-5 text-center">
+                    <div className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-amber-50 text-amber-600 rounded-lg text-xs font-bold border border-amber-100">
+                      {member.notConnected}
+                    </div>
+                  </td>
+                  <td className="py-5 text-right pr-4">
+                    <div className="flex items-center justify-end gap-3 font-mono">
+                      <div className="w-20 h-1.5 bg-stone-100 rounded-full overflow-hidden">
+                        <div 
+                          className="h-full bg-stone-900 rounded-full" 
+                          style={{ width: `${member.efficacy}%` }}
+                        />
+                      </div>
+                      <span className="text-sm font-bold text-stone-900 w-10 text-right">{member.efficacy}%</span>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+              {dailyEffort.length === 0 && (
+                <tr>
+                  <td colSpan={5} className="py-10 text-center text-stone-400 italic text-sm">No activity found for this period.</td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>

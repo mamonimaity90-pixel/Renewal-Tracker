@@ -509,6 +509,7 @@ export const HospitalList = memo(function HospitalList({ hospitals, users, inter
                   </button>
                 </th>
                 <th className="p-4 text-xs font-serif italic text-stone-400 uppercase tracking-wider">Contact Details</th>
+                <th className="p-4 text-xs font-serif italic text-stone-400 uppercase tracking-wider">Location</th>
                 <th className="p-4 text-xs font-serif italic text-stone-400 uppercase tracking-wider">
                   <button onClick={() => handleSort('nextFollowUpDate')} className="flex items-center gap-1">
                     Follow-up <ArrowUpDown className="w-3 h-3" />
