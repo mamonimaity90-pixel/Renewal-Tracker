@@ -14,7 +14,7 @@ import {
   Legend,
   LabelList
 } from 'recharts';
-import { FileText, AlertCircle, CheckCircle2, Clock, TrendingUp, Filter, Search, X, ArrowUpDown, ChevronDown, Users, UserCheck, PhoneOff, Ban } from 'lucide-react';
+import { FileText, AlertCircle, CheckCircle2, Clock, TrendingUp, Filter, Search, X, ArrowUpDown, ChevronDown, Users, UserCheck, PhoneOff, Ban, UserPlus } from 'lucide-react';
 import { format, isAfter, isBefore, parseISO, differenceInDays, differenceInMonths, startOfDay, endOfDay, isWithinInterval } from 'date-fns';
 import { cn } from '../lib/utils';
 import { generateHospitalReport } from '../lib/reportGenerator';
@@ -25,9 +25,10 @@ interface DashboardProps {
   applications: Application[];
   users: User[];
   setActiveTab?: (tab: any) => void;
+  currentUser?: User | null;
 }
 
-export const Dashboard = memo(function Dashboard({ hospitals, interactions, applications, users, setActiveTab }: DashboardProps) {
+export const Dashboard = memo(function Dashboard({ hospitals, interactions, applications, users, setActiveTab, currentUser }: DashboardProps) {
   const now = new Date();
   
   // Filter States
@@ -241,6 +242,42 @@ export const Dashboard = memo(function Dashboard({ hospitals, interactions, appl
       };
     }).sort((a, b) => b.total - a.total);
   }, [users, interactions, effortDateStart, effortDateEnd]);
+
+  const userRoadmap = useMemo(() => {
+    if (!currentUser) return null;
+
+    const myLeads = hospitals.filter(h => h.assignedTo === currentUser.uid && !h.reapplied);
+    
+    const neverCalledCount = myLeads.filter(h => {
+      const hInteractions = interactions.filter(i => i.hospitalId === h.id);
+      return hInteractions.length === 0;
+    }).length;
+
+    const followUpsToday = myLeads.filter(h => {
+      if (!h.nextFollowUpDate) return false;
+      const fu = parseISO(h.nextFollowUpDate);
+      return format(fu, 'yyyy-MM-dd') === format(new Date(), 'yyyy-MM-dd');
+    }).length;
+
+    const followUpsOverdue = myLeads.filter(h => {
+      if (!h.nextFollowUpDate) return false;
+      const fu = parseISO(h.nextFollowUpDate);
+      return isBefore(fu, startOfDay(new Date()));
+    }).length;
+
+    const interactionsToday = interactions.filter(i => 
+      i.userId === currentUser.uid && 
+      format(parseISO(i.timestamp), 'yyyy-MM-dd') === format(new Date(), 'yyyy-MM-dd')
+    );
+
+    return {
+      totalLeads: myLeads.length,
+      neverCalled: neverCalledCount,
+      followUpsToday,
+      followUpsOverdue,
+      doneToday: interactionsToday.length
+    };
+  }, [currentUser, hospitals, interactions]);
 
   const trendData = useMemo(() => {
     const timeLabels = [];
@@ -608,6 +645,76 @@ export const Dashboard = memo(function Dashboard({ hospitals, interactions, appl
           </div>
         ))}
       </div>
+
+      {/* Personal Roadmap */}
+      {userRoadmap && (
+        <div className="bg-stone-900 p-8 rounded-3xl shadow-sm text-white relative overflow-hidden group">
+          <div className="absolute top-0 right-0 w-64 h-64 bg-white/5 rounded-full -mr-32 -mt-32 transition-transform group-hover:scale-110" />
+          
+          <div className="relative z-10">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
+              <div>
+                <h3 className="text-xl font-serif font-bold mb-1">My Daily Roadmap</h3>
+                <p className="text-white/40 text-sm italic tracking-tight">Tracking your personal daily targets for {format(new Date(), 'EEEE, MMMM d')}</p>
+              </div>
+              <div className="flex items-center gap-6">
+                <div className="text-center">
+                  <p className="text-3xl font-serif font-bold">{userRoadmap.doneToday}</p>
+                  <p className="text-[10px] text-white/40 uppercase font-black tracking-widest mt-1">Interactions Done Today</p>
+                </div>
+                <div className="w-px h-12 bg-white/10" />
+                <div className="text-center">
+                  <p className="text-3xl font-serif font-bold">{userRoadmap.followUpsToday + userRoadmap.followUpsOverdue + userRoadmap.neverCalled}</p>
+                  <p className="text-[10px] text-white/40 uppercase font-black tracking-widest mt-1 text-balance">Remaining Pending Leads</p>
+                </div>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-8">
+              <div className="bg-white/5 p-4 rounded-2xl border border-white/10 hover:bg-white/10 transition-colors">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-[10px] text-amber-400 font-bold uppercase tracking-widest">Urgent Follow-ups</span>
+                  <Clock className="w-4 h-4 text-amber-400" />
+                </div>
+                <p className="text-2xl font-serif font-bold">
+                  {userRoadmap.followUpsToday + userRoadmap.followUpsOverdue}
+                </p>
+                <p className="text-[10px] text-white/40 mt-1 italic">
+                  {userRoadmap.followUpsOverdue} overdue / {userRoadmap.followUpsToday} scheduled for today
+                </p>
+              </div>
+              
+              <div className="bg-white/5 p-4 rounded-2xl border border-white/10 hover:bg-white/10 transition-colors">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-[10px] text-blue-400 font-bold uppercase tracking-widest">New Leads (Never Called)</span>
+                  <UserPlus className="w-4 h-4 text-blue-400" />
+                </div>
+                <p className="text-2xl font-serif font-bold">{userRoadmap.neverCalled}</p>
+                <p className="text-[10px] text-white/40 mt-1 italic">Assigned unrenewed leads needing first contact</p>
+              </div>
+
+              <div className="bg-white/5 p-4 rounded-2xl border border-white/10 hover:bg-white/10 transition-colors">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-[10px] text-emerald-400 font-bold uppercase tracking-widest">Personal Portfolio Status</span>
+                  <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                </div>
+                <p className="text-2xl font-serif font-bold">{userRoadmap.totalLeads}</p>
+                <p className="text-[10px] text-white/40 mt-1 italic">Active pending leads assigned to me</p>
+              </div>
+            </div>
+            
+            <div className="mt-8 flex justify-end">
+              <button 
+                onClick={() => setActiveTab?.('hospitals')}
+                className="group/btn flex items-center gap-2 bg-white text-stone-900 px-6 py-3 rounded-xl font-bold hover:bg-stone-100 transition-all text-sm shadow-xl shadow-white/5"
+              >
+                Start Calling My Target List
+                <TrendingUp className="w-4 h-4 group-hover/btn:translate-x-1 transition-transform" />
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Engagement Gap Analysis */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">

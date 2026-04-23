@@ -364,6 +364,7 @@ export default function App() {
           applications={applications} 
           users={users}
           setActiveTab={setActiveTab}
+          currentUser={user}
         />
       )}
       {activeTab === 'hospitals' && (

@@ -41,7 +41,7 @@ const ITEMS_PER_PAGE = 50;
 
 export const HospitalList = memo(function HospitalList({ hospitals, users, interactions, isAdmin }: HospitalListProps) {
   const [search, setSearch] = useState('');
-  const [sortField, setSortField] = useState<keyof Hospital>('expiryDate');
+  const [sortField, setSortField] = useState<keyof Hospital | 'lastAttemptedDate'>('expiryDate');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
   const [isAdding, setIsAdding] = useState(false);
   const [isBulkUploading, setIsBulkUploading] = useState(false);
@@ -151,9 +151,27 @@ export const HospitalList = memo(function HospitalList({ hospitals, users, inter
 
         return matchesSearch && matchesUser && matchesState && matchesBatch && matchesRenewal && matchesConnection && matchesDate && matchesEffort && matchesFollowUp;
       })
+      .map(h => {
+        const hospitalInteractions = interactions.filter(i => i.hospitalId === h.id);
+        const lastAtt = hospitalInteractions.sort((a, b) => 
+          parseISO(b.timestamp).getTime() - parseISO(a.timestamp).getTime()
+        )[0];
+        
+        return {
+          ...h,
+          lastAttemptedDate: lastAtt?.timestamp || null
+        };
+      })
       .sort((a, b) => {
-        const valA = a[sortField] || '';
-        const valB = b[sortField] || '';
+        if (sortField === 'lastAttemptedDate') {
+          const valA = (a as any).lastAttemptedDate || '';
+          const valB = (b as any).lastAttemptedDate || '';
+          if (valA < valB) return sortOrder === 'asc' ? -1 : 1;
+          if (valA > valB) return sortOrder === 'asc' ? 1 : -1;
+          return 0;
+        }
+        const valA = (a as any)[sortField] || '';
+        const valB = (b as any)[sortField] || '';
         if (valA < valB) return sortOrder === 'asc' ? -1 : 1;
         if (valA > valB) return sortOrder === 'asc' ? 1 : -1;
         return 0;
@@ -166,7 +184,7 @@ export const HospitalList = memo(function HospitalList({ hospitals, users, inter
     currentPage * ITEMS_PER_PAGE
   );
 
-  const handleSort = (field: keyof Hospital) => {
+  const handleSort = (field: keyof Hospital | 'lastAttemptedDate') => {
     if (sortField === field) {
       setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
     } else {
@@ -525,6 +543,11 @@ export const HospitalList = memo(function HospitalList({ hospitals, users, inter
                     Expiry Date <ArrowUpDown className="w-3 h-3" />
                   </button>
                 </th>
+                <th className="p-4 text-xs font-serif italic text-stone-400 uppercase tracking-wider">
+                  <button onClick={() => handleSort('lastAttemptedDate')} className="flex items-center gap-1">
+                    Last Attempt <ArrowUpDown className="w-3 h-3" />
+                  </button>
+                </th>
                 <th className="p-4 text-xs font-serif italic text-stone-400 uppercase tracking-wider">Reapplied?</th>
                 <th className="p-4 text-xs font-serif italic text-stone-400 uppercase tracking-wider">Assigned To</th>
                 <th className="p-4 text-xs font-serif italic text-stone-400 uppercase tracking-wider">Status</th>
@@ -610,6 +633,20 @@ export const HospitalList = memo(function HospitalList({ hospitals, users, inter
                       <Calendar className="w-3 h-3" />
                       {format(parseISO(hospital.expiryDate), 'MMM d, yyyy')}
                     </div>
+                  </td>
+                  <td className="p-4">
+                    {(hospital as any).lastAttemptedDate ? (
+                      <div className="flex flex-col gap-0.5">
+                        <span className="text-xs font-bold text-stone-700">
+                          {format(parseISO((hospital as any).lastAttemptedDate), 'MMM d, yyyy')}
+                        </span>
+                        <span className="text-[9px] text-stone-400 uppercase font-medium">
+                          {differenceInDays(new Date(), parseISO((hospital as any).lastAttemptedDate))} days ago
+                        </span>
+                      </div>
+                    ) : (
+                      <span className="text-[10px] text-stone-300 uppercase font-black italic">Never Called</span>
+                    )}
                   </td>
                   <td className="p-4">
                     <div className="flex flex-col gap-1">
