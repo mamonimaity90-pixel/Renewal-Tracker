@@ -199,11 +199,20 @@ export const Dashboard = memo(function Dashboard({ hospitals, interactions, appl
         return hInteractions.some(i => i.result === 'Connected');
       }).length;
       
-      const renewedCount = assignedHospitals.filter(h => h.reapplied).length;
+      const effortLedCount = assignedHospitals.filter(h => {
+        if (!h.reapplied || !h.renewalApplicationDate) return false;
+        const renewalDate = parseISO(h.renewalApplicationDate);
+        return interactions.some(i => 
+          i.hospitalId === h.id && 
+          i.result === 'Connected' &&
+          isBefore(parseISO(i.timestamp), renewalDate)
+        );
+      }).length;
+
       const pendingCount = assignedHospitals.filter(h => !h.reapplied).length;
 
       const conversionRate = assignedHospitals.length > 0 
-        ? Math.round((renewedCount / assignedHospitals.length) * 100) 
+        ? Math.round((effortLedCount / assignedHospitals.length) * 100) 
         : 0;
 
       return {
@@ -212,11 +221,11 @@ export const Dashboard = memo(function Dashboard({ hospitals, interactions, appl
         notContacted,
         neverConnected,
         connected,
-        renewedCount,
+        effortLedCount,
         pendingCount,
         conversionRate
       };
-    }).sort((a, b) => b.renewedCount - a.renewedCount);
+    }).sort((a, b) => b.effortLedCount - a.effortLedCount);
   }, [users, filteredHospitals, interactions]);
 
   const dailyEffort = useMemo(() => {
@@ -1415,7 +1424,7 @@ export const Dashboard = memo(function Dashboard({ hospitals, interactions, appl
                 <th className="py-4 text-[10px] font-bold text-stone-400 uppercase tracking-wider text-center">Not Contacted</th>
                 <th className="py-4 text-[10px] font-bold text-stone-400 uppercase tracking-wider text-center">Never Connected</th>
                 <th className="py-4 text-[10px] font-bold text-stone-400 uppercase tracking-wider text-center">Connected</th>
-                <th className="py-4 text-[10px] font-bold text-stone-400 uppercase tracking-wider text-center">Renewed (Leads)</th>
+                <th className="py-4 text-[10px] font-bold text-stone-400 uppercase tracking-wider text-center">Effort-led Conversions</th>
                 <th className="py-4 text-[10px] font-bold text-stone-400 uppercase tracking-wider text-center">Pending (Leads)</th>
                 <th className="py-4 text-[10px] font-bold text-stone-400 uppercase tracking-wider text-right pr-4">Conv. Rate</th>
               </tr>
@@ -1451,7 +1460,7 @@ export const Dashboard = memo(function Dashboard({ hospitals, interactions, appl
                   <td className="py-5 text-center">
                     <div className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-blue-50 text-blue-600 rounded-lg text-xs font-bold">
                       <CheckCircle2 className="w-3.5 h-3.5" />
-                      {member.renewedCount}
+                      {member.effortLedCount}
                     </div>
                   </td>
                   <td className="py-5 text-center">

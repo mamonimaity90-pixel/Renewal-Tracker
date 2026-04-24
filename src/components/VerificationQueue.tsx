@@ -56,12 +56,31 @@ export function VerificationQueue({ interactions, hospitals, users, currentUser 
   );
 }
 
+const REASONS = [
+  'Applied elsewhere',
+  'Concerned person not available',
+  'Does not see benefit',
+  'Hospital shut down',
+  'Need assistance',
+  'Not interested',
+  'Not Prepared',
+  'SPOC change',
+  'Will apply soon',
+  'Yet to decide',
+  'Certification to Accreditation',
+  'Already applied for renewal',
+  'Others'
+];
+
 function VerificationItem(props: any) {
   const { interaction, hospitals, users, currentUser } = props;
   const hospital = hospitals.find(h => h.id === interaction.hospitalId);
   const caller = users.find(u => u.uid === interaction.userId);
   const [loading, setLoading] = useState(false);
   const [rejecting, setRejecting] = useState(false);
+  const [editingReason, setEditingReason] = useState(false);
+  const [currentReason, setCurrentReason] = useState(interaction.reason || '');
+  const [adminChangeRemarks, setAdminChangeRemarks] = useState(interaction.adminChangeRemarks || '');
 
   // Initialize form data from interaction and hospital
   const [formData, setFormData] = useState({
@@ -83,13 +102,24 @@ function VerificationItem(props: any) {
     designation: hospital?.designation || '',
     status: hospital?.status || 'Active'
   });
+  const [verificationRemarks, setVerificationRemarks] = useState('');
+  const [showRejectForm, setShowRejectForm] = useState(false);
 
   const handleAction = async (status: 'Verified' | 'Rejected') => {
-    if (status === 'Rejected') {
-      if (!confirm('Are you sure you want to reject these details?')) return;
-      setRejecting(true);
-    } else {
+    if (status === 'Rejected' && !showRejectForm) {
+      setShowRejectForm(true);
+      return;
+    }
+
+    if (status === 'Rejected' && !verificationRemarks.trim()) {
+      alert('Please provide remarks for rejection.');
+      return;
+    }
+
+    if (status === 'Verified') {
       setLoading(true);
+    } else {
+      setRejecting(true);
     }
 
     try {
@@ -100,6 +130,9 @@ function VerificationItem(props: any) {
         verificationStatus: status,
         verifiedBy: currentUser.uid,
         verifiedAt: serverTimestamp(),
+        verificationRemarks: verificationRemarks.trim(),
+        adminChangeRemarks: adminChangeRemarks.trim(),
+        reason: currentReason,
         // Also update the reported data in the interaction if admin edited it
         reapplicationProgram: formData.reappliedProgram,
         reapplicationNumber: formData.renewalApplicationNo,
@@ -163,10 +196,64 @@ function VerificationItem(props: any) {
         {/* Interaction Context */}
         <div className="p-6 bg-stone-50 rounded-2xl border border-stone-100 space-y-3 relative overflow-hidden">
           <div className="absolute top-0 left-0 w-1 h-full bg-stone-200"></div>
-          <p className="text-[10px] font-bold text-stone-400 uppercase tracking-widest">Original Log Reason</p>
-          <div className="flex items-center gap-2">
-            <span className="text-sm font-bold text-stone-900">{interaction.reason}</span>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <p className="text-[10px] font-bold text-stone-400 uppercase tracking-widest">Original Log Reason</p>
+              <span className={cn(
+                "px-1.5 py-0.5 rounded text-[8px] font-black uppercase tracking-tighter",
+                interaction.type === 'Manual Update' ? "bg-amber-100 text-amber-700" : "bg-stone-100 text-stone-600"
+              )}>
+                {interaction.type || 'Call'}
+              </span>
+            </div>
+            {!editingReason && (
+              <button 
+                onClick={() => setEditingReason(true)}
+                className="text-[10px] font-bold text-stone-400 hover:text-stone-900 border-b border-stone-200 border-dashed"
+              >
+                Edit Category
+              </button>
+            )}
           </div>
+          
+          <div className="flex items-center gap-2">
+            {editingReason ? (
+              <div className="flex items-center gap-2 w-full">
+                <select
+                  className="flex-1 p-2 bg-white border border-stone-200 rounded-xl text-sm font-bold text-stone-900 focus:ring-2 focus:ring-amber-200 outline-none"
+                  value={currentReason}
+                  onChange={(e) => setCurrentReason(e.target.value)}
+                >
+                  {REASONS.map(r => (
+                    <option key={r} value={r}>{r}</option>
+                  ))}
+                </select>
+                <button 
+                  onClick={() => setEditingReason(false)}
+                  className="p-2 bg-stone-900 text-white rounded-xl hover:bg-black transition-colors"
+                  title="DoneEditing"
+                >
+                  <CheckCircle2 className="w-4 h-4" />
+                </button>
+              </div>
+            ) : (
+              <span className="text-sm font-bold text-stone-900">{currentReason}</span>
+            )}
+          </div>
+          
+          {editingReason && (
+            <div className="space-y-2 pt-2">
+              <label className="text-[10px] font-bold text-stone-400 uppercase tracking-wider">Reason for correction (shows in activity logs)</label>
+              <input 
+                type="text"
+                placeholder="Why are you changing the category?"
+                className="w-full p-3 bg-white border border-stone-100 rounded-xl text-xs focus:ring-2 focus:ring-amber-200 outline-none transition-all"
+                value={adminChangeRemarks}
+                onChange={(e) => setAdminChangeRemarks(e.target.value)}
+              />
+            </div>
+          )}
+
           {interaction.remarks && (
             <p className="text-sm text-stone-600 italic">"{interaction.remarks}"</p>
           )}
@@ -268,23 +355,57 @@ function VerificationItem(props: any) {
         </div>
 
         {/* Unified Verification Actions */}
-        <div className="flex flex-col sm:flex-row gap-4 pt-8 border-t border-stone-100">
-          <button
-            disabled={loading || rejecting}
-            onClick={() => handleAction('Verified')}
-            className="flex-1 flex items-center justify-center gap-2 bg-stone-900 text-white py-4 px-8 rounded-2xl hover:bg-black transition-all font-bold disabled:opacity-50 text-sm shadow-md active:scale-[0.98]"
-          >
-            {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : <CheckCircle2 className="w-5 h-5" />}
-            Approve & Update Records
-          </button>
-          <button
-            disabled={loading || rejecting}
-            onClick={() => handleAction('Rejected')}
-            className="flex items-center justify-center gap-2 bg-white text-red-600 border border-red-100 py-4 px-8 rounded-2xl hover:bg-red-50 transition-all font-bold disabled:opacity-50 text-sm active:scale-[0.98]"
-          >
-            {rejecting ? <Loader2 className="w-5 h-5 animate-spin" /> : <XCircle className="w-5 h-5" />}
-            Reject
-          </button>
+        <div className="flex flex-col gap-6 pt-8 border-t border-stone-100">
+          {showRejectForm && (
+            <div className="p-6 bg-red-50 rounded-2xl border border-red-100 space-y-3">
+              <label className="block text-xs font-bold text-red-800 uppercase tracking-widest">Provide Remarks for Rejection</label>
+              <textarea
+                className="w-full p-4 bg-white border border-red-200 rounded-xl text-sm focus:ring-2 focus:ring-red-200 outline-none transition-all"
+                rows={3}
+                placeholder="Explain why these details are being rejected..."
+                value={verificationRemarks}
+                onChange={e => setVerificationRemarks(e.target.value)}
+              />
+              <div className="flex justify-end gap-3 pt-2">
+                <button
+                  onClick={() => setShowRejectForm(false)}
+                  className="px-4 py-2 text-xs font-bold text-stone-500 hover:text-stone-700 uppercase"
+                >
+                  Go Back
+                </button>
+                <button
+                  disabled={rejecting || !verificationRemarks.trim()}
+                  onClick={() => handleAction('Rejected')}
+                  className="px-6 py-2 bg-red-600 text-white text-xs font-bold rounded-lg hover:bg-red-700 disabled:opacity-50 transition-colors uppercase"
+                >
+                  {rejecting ? 'Rejecting...' : 'Confirm Rejection'}
+                </button>
+              </div>
+            </div>
+          )}
+
+          <div className="flex flex-col sm:flex-row gap-4">
+            {!showRejectForm && (
+              <>
+                <button
+                  disabled={loading || rejecting}
+                  onClick={() => handleAction('Verified')}
+                  className="flex-1 flex items-center justify-center gap-2 bg-stone-900 text-white py-4 px-8 rounded-2xl hover:bg-black transition-all font-bold disabled:opacity-50 text-sm shadow-md active:scale-[0.98]"
+                >
+                  {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : <CheckCircle2 className="w-5 h-5" />}
+                  Approve & Update Records
+                </button>
+                <button
+                  disabled={loading || rejecting}
+                  onClick={() => handleAction('Rejected')}
+                  className="flex items-center justify-center gap-2 bg-white text-red-600 border border-red-100 py-4 px-8 rounded-2xl hover:bg-red-50 transition-all font-bold disabled:opacity-50 text-sm active:scale-[0.98]"
+                >
+                  <XCircle className="w-5 h-5" />
+                  Reject
+                </button>
+              </>
+            )}
+          </div>
         </div>
       </div>
     </div>

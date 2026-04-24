@@ -1,21 +1,60 @@
 import React, { useState, useMemo } from 'react';
 import { Hospital, Interaction, User } from '../types';
-import { Phone, Mail, Users, Calendar, Search, Filter, Clock, ChevronRight, CheckCircle2 } from 'lucide-react';
+import { Phone, Mail, Users, Calendar, Search, Filter, Clock, ChevronRight, CheckCircle2, Edit2, Check, X, Loader2, AlertCircle } from 'lucide-react';
 import { format, parseISO, isWithinInterval, startOfDay, endOfDay, isBefore } from 'date-fns';
+import { db } from '../firebase';
+import { doc, updateDoc } from 'firebase/firestore';
 import { cn } from '../lib/utils';
 
 interface ActivityLogProps {
   hospitals: Hospital[];
   interactions: Interaction[];
   users: User[];
+  currentUser: User | null;
 }
 
-export function ActivityLog({ hospitals, interactions, users }: ActivityLogProps) {
+const REASONS = [
+  'Applied elsewhere',
+  'Concerned person not available',
+  'Does not see benefit',
+  'Hospital shut down',
+  'Need assistance',
+  'Not interested',
+  'Not Prepared',
+  'SPOC change',
+  'Will apply soon',
+  'Yet to decide',
+  'Certification to Accreditation',
+  'Already applied for renewal',
+  'Others'
+];
+
+export function ActivityLog({ hospitals, interactions, users, currentUser }: ActivityLogProps) {
   const [filterType, setFilterType] = useState<string>('all');
   const [filterUser, setFilterUser] = useState<string>('all');
   const [searchTerm, setSearchTerm] = useState('');
   const [dateStart, setDateStart] = useState('');
   const [dateEnd, setDateEnd] = useState('');
+  const [editingReasonId, setEditingReasonId] = useState<string | null>(null);
+  const [changeRemarks, setChangeRemarks] = useState('');
+  const [updatingReason, setUpdatingReason] = useState(false);
+
+  const handleUpdateReason = async (interactionId: string, newReason: string) => {
+    setUpdatingReason(true);
+    try {
+      await updateDoc(doc(db, 'interactions', interactionId), {
+        reason: newReason,
+        adminChangeRemarks: changeRemarks.trim()
+      });
+      setEditingReasonId(null);
+      setChangeRemarks('');
+    } catch (error) {
+      console.error('Failed to update reason:', error);
+      alert('Failed to update reason. Please check permissions.');
+    } finally {
+      setUpdatingReason(false);
+    }
+  };
 
   const filteredLogs = useMemo(() => {
     return interactions
@@ -146,10 +185,71 @@ export function ActivityLog({ hospitals, interactions, users }: ActivityLogProps
                   </div>
 
                   {log.reason && (
-                    <div className="flex flex-wrap gap-2">
-                      <span className="text-[10px] font-bold text-stone-500 bg-stone-100 px-2 py-0.5 rounded uppercase">
-                        Reason: {log.reason}
-                      </span>
+                    <div className="flex flex-wrap items-center gap-2">
+                      {editingReasonId === log.id ? (
+                        <div className="flex flex-col gap-2 bg-stone-50 p-3 rounded-2xl border border-stone-200 min-w-[300px]">
+                          <div className="flex items-center gap-2">
+                            <select
+                              className="flex-1 bg-white border border-stone-200 rounded-xl p-2 text-[10px] font-bold text-stone-700 focus:ring-2 focus:ring-stone-200"
+                              defaultValue={log.reason}
+                              id={`reason-select-${log.id}`}
+                            >
+                              {REASONS.map(r => (
+                                <option key={r} value={r}>{r}</option>
+                              ))}
+                            </select>
+                            <div className="flex items-center gap-1">
+                              <button
+                                disabled={updatingReason}
+                                onClick={() => {
+                                  const select = document.getElementById(`reason-select-${log.id}`) as HTMLSelectElement;
+                                  handleUpdateReason(log.id, select.value);
+                                }}
+                                className="p-1.5 bg-emerald-50 text-emerald-600 rounded-lg transition-colors border border-emerald-100"
+                                title="Save Reason"
+                              >
+                                {updatingReason ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
+                              </button>
+                              <button
+                                disabled={updatingReason}
+                                onClick={() => {
+                                  setEditingReasonId(null);
+                                  setChangeRemarks('');
+                                }}
+                                className="p-1.5 bg-red-50 text-red-600 rounded-lg transition-colors border border-red-100"
+                                title="Cancel"
+                              >
+                                <X className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          </div>
+                          <div className="space-y-1">
+                            <label className="text-[9px] font-bold text-stone-400 uppercase ml-1">Why are you changing this?</label>
+                            <input 
+                              type="text"
+                              placeholder="Add a remark for the team..."
+                              className="w-full p-2 bg-white border border-stone-200 rounded-xl text-xs focus:ring-2 focus:ring-stone-200"
+                              value={changeRemarks}
+                              onChange={(e) => setChangeRemarks(e.target.value)}
+                            />
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="group/reason flex items-center gap-2">
+                          <span className="text-[10px] font-bold text-stone-500 bg-stone-100 px-2 py-0.5 rounded uppercase">
+                            Reason: {log.reason}
+                          </span>
+                          {currentUser?.role === 'admin' && (
+                            <button
+                              onClick={() => setEditingReasonId(log.id)}
+                              className="p-1 opacity-30 group-hover/reason:opacity-100 transition-opacity text-stone-400 hover:text-stone-900"
+                              title="Edit Category"
+                            >
+                              <Edit2 className="w-3 h-3" />
+                            </button>
+                          )}
+                        </div>
+                      )}
                       {log.verificationStatus && (
                         <span className={cn(
                           "text-[10px] font-bold px-2 py-0.5 rounded uppercase flex items-center gap-1",
@@ -176,6 +276,16 @@ export function ActivityLog({ hospitals, interactions, users }: ActivityLogProps
                     <p className="text-sm text-stone-600 italic border-l-2 border-stone-100 pl-4 py-1">
                       "{log.remarks}"
                     </p>
+                  )}
+
+                  {log.adminChangeRemarks && (
+                    <div className="p-3 bg-amber-50/50 border border-amber-100 rounded-2xl flex items-start gap-2">
+                      <AlertCircle className="w-3.5 h-3.5 text-amber-600 shrink-0 mt-0.5" />
+                      <div>
+                        <p className="text-[10px] font-bold text-amber-700 uppercase tracking-wider mb-0.5">Admin Correction Note</p>
+                        <p className="text-xs text-stone-600 italic">"{log.adminChangeRemarks}"</p>
+                      </div>
+                    </div>
                   )}
 
                   <div className="flex flex-wrap items-center gap-x-6 gap-y-2 pt-2 border-t border-stone-50">

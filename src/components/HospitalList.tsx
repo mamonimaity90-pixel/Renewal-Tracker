@@ -793,6 +793,7 @@ export const HospitalList = memo(function HospitalList({ hospitals, users, inter
           hospital={hospitals.find(h => h.id === activeHospitalId)!}
           interactions={interactions.filter(i => i.hospitalId === activeHospitalId)}
           users={users}
+          isAdmin={isAdmin}
           onClose={() => setActiveHospitalId(null)}
         />
       )}
@@ -868,10 +869,11 @@ function MultiSelect({ options, selected, onChange, placeholder }: {
   );
 }
 
-function LogInteractionModal({ hospital, interactions, users, onClose }: { 
+function LogInteractionModal({ hospital, interactions, users, isAdmin, onClose }: { 
   hospital: Hospital, 
   interactions: Interaction[],
   users: User[],
+  isAdmin: boolean,
   onClose: () => void 
 }) {
   const [formData, setFormData] = useState({
@@ -884,6 +886,10 @@ function LogInteractionModal({ hospital, interactions, users, onClose }: {
   });
   const [loading, setLoading] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
+  const [editingHistoryId, setEditingHistoryId] = useState<string | null>(null);
+  const [editReason, setEditReason] = useState('');
+  const [editRemarks, setEditRemarks] = useState('');
+  const [isUpdatingHistory, setIsUpdatingHistory] = useState(false);
   const [reapplicationData, setReapplicationData] = useState({
     reapplied: false,
     reapplicationProgram: '',
@@ -891,9 +897,24 @@ function LogInteractionModal({ hospital, interactions, users, onClose }: {
     reapplicationDate: ''
   });
 
+  // Handle Manual Update logic
+  useEffect(() => {
+    if (formData.type === 'Manual Update') {
+      setFormData(prev => ({ 
+        ...prev, 
+        result: 'Direct Update', 
+        reason: 'Already applied for renewal' 
+      }));
+      setReapplicationData(prev => ({ ...prev, reapplied: true }));
+    } else if (formData.result === 'Direct Update') {
+      setFormData(prev => ({ ...prev, result: 'Connected' }));
+    }
+  }, [formData.type]);
+
   const needsReapplicationDetails = 
     formData.reason === 'Certification to Accreditation' || 
-    formData.reason === 'Already applied for renewal';
+    formData.reason === 'Already applied for renewal' ||
+    formData.type === 'Manual Update';
 
   const reasons = [
     'Certification to Accreditation',
@@ -955,6 +976,25 @@ function LogInteractionModal({ hospital, interactions, users, onClose }: {
     }
   };
 
+  const handleUpdateHistoryReason = async (interactionId: string) => {
+    if (!editReason) return;
+    setIsUpdatingHistory(true);
+    try {
+      await updateDoc(doc(db, 'interactions', interactionId), {
+        reason: editReason,
+        adminChangeRemarks: editRemarks.trim()
+      });
+      setEditingHistoryId(null);
+      setEditReason('');
+      setEditRemarks('');
+    } catch (error) {
+      console.error('History update failed:', error);
+      alert('Failed to update interaction history.');
+    } finally {
+      setIsUpdatingHistory(false);
+    }
+  };
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-stone-900/20 backdrop-blur-sm">
       <div className="bg-white w-full max-w-2xl rounded-3xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
@@ -1003,11 +1043,80 @@ function LogInteractionModal({ hospital, interactions, users, onClose }: {
                           {interaction.assignedToName && ` • Assigned to: ${interaction.assignedToName}`}
                         </span>
                       </div>
-                      {interaction.reason && (
-                        <p className="text-xs font-bold text-stone-700 mb-1">Reason: {interaction.reason}</p>
+                      
+                      {editingHistoryId === interaction.id ? (
+                        <div className="space-y-3 bg-white p-3 rounded-xl border border-stone-200 shadow-sm mt-1">
+                          <div>
+                            <label className="text-[10px] font-bold text-stone-400 uppercase tracking-widest block mb-1">New Category</label>
+                            <select
+                              className="w-full bg-stone-50 border-none rounded-lg p-2 text-xs font-bold text-stone-900"
+                              value={editReason}
+                              onChange={(e) => setEditReason(e.target.value)}
+                            >
+                              {reasons.map(r => (
+                                <option key={r} value={r}>{r}</option>
+                              ))}
+                            </select>
+                          </div>
+                          <div>
+                            <label className="text-[10px] font-bold text-stone-400 uppercase tracking-widest block mb-1">Correction Remark (for team visibility)</label>
+                            <input
+                              type="text"
+                              className="w-full bg-stone-50 border-none rounded-lg p-2 text-xs"
+                              placeholder="Why is this being changed?"
+                              value={editRemarks}
+                              onChange={(e) => setEditRemarks(e.target.value)}
+                            />
+                          </div>
+                          <div className="flex gap-2">
+                            <button
+                              disabled={isUpdatingHistory}
+                              onClick={() => handleUpdateHistoryReason(interaction.id)}
+                              className="flex-1 bg-stone-900 text-white text-[10px] font-bold py-1.5 rounded-lg hover:bg-black disabled:opacity-50"
+                            >
+                              {isUpdatingHistory ? 'Updating...' : 'Save Change'}
+                            </button>
+                            <button
+                              disabled={isUpdatingHistory}
+                              onClick={() => setEditingHistoryId(null)}
+                              className="flex-1 bg-stone-100 text-stone-600 text-[10px] font-bold py-1.5 rounded-lg hover:bg-stone-200 disabled:opacity-50"
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="flex items-center justify-between group/hist">
+                          {interaction.reason && (
+                            <p className="text-xs font-bold text-stone-700">Reason: {interaction.reason}</p>
+                          )}
+                          {isAdmin && interaction.reason && (
+                            <button
+                              onClick={() => {
+                                setEditingHistoryId(interaction.id);
+                                setEditReason(interaction.reason || '');
+                                setEditRemarks(interaction.adminChangeRemarks || '');
+                              }}
+                              className="text-[10px] font-bold text-stone-400 hover:text-stone-900 px-2 py-0.5 rounded border border-stone-200 border-dashed opacity-0 group-hover/hist:opacity-100 transition-opacity"
+                            >
+                              Edit Category
+                            </button>
+                          )}
+                        </div>
                       )}
+
                       {interaction.remarks && (
                         <p className="text-sm text-stone-600 mb-2 italic">"{interaction.remarks}"</p>
+                      )}
+
+                      {interaction.adminChangeRemarks && (
+                        <div className="mb-2 p-2 bg-amber-50 rounded-xl border border-amber-100 flex items-start gap-2">
+                          <AlertCircle className="w-3 h-3 text-amber-600 shrink-0 mt-0.5" />
+                          <div>
+                            <p className="text-[9px] font-bold text-amber-700 uppercase tracking-tighter">Admin Correction</p>
+                            <p className="text-xs text-stone-600 italic">"{interaction.adminChangeRemarks}"</p>
+                          </div>
+                        </div>
                       )}
                       {interaction.notes && (
                         <div className="mt-2 pt-2 border-t border-stone-200">
@@ -1038,37 +1147,51 @@ function LogInteractionModal({ hospital, interactions, users, onClose }: {
                     <option value="Call">Call</option>
                     <option value="Email">Email</option>
                     <option value="Meeting">Meeting</option>
+                    <option value="Manual Update">Manual Update (Conversion Report)</option>
                   </select>
                 </div>
                 <div>
                   <label className="block text-[10px] font-bold text-stone-400 uppercase mb-1">Disposition</label>
                   <select
                     className="w-full p-3 bg-stone-50 border-none rounded-xl text-sm"
+                    disabled={formData.type === 'Manual Update'}
                     value={formData.result}
                     onChange={e => setFormData({...formData, result: e.target.value as any})}
                   >
                     <option value="Connected">Connected</option>
                     <option value="Not Connected">Not Connected</option>
+                    {formData.type === 'Manual Update' && <option value="Direct Update">Direct Update</option>}
                   </select>
                 </div>
               </div>
 
-              {formData.result === 'Connected' && (
+              {(formData.result === 'Connected' || formData.type === 'Manual Update') && (
                 <div className="animate-in fade-in slide-in-from-top-2 duration-300 space-y-4">
-                  <div>
-                    <label className="block text-[10px] font-bold text-stone-400 uppercase mb-1">Reason Classification</label>
-                    <select
-                      required
-                      className="w-full p-3 bg-stone-50 border-none rounded-xl text-sm"
-                      value={formData.reason}
-                      onChange={e => setFormData({...formData, reason: e.target.value as any})}
-                    >
-                      <option value="">Select Reason...</option>
-                      {reasons.map(r => (
-                        <option key={r} value={r}>{r}</option>
-                      ))}
-                    </select>
-                  </div>
+                  {(formData.result === 'Connected' || formData.type === 'Manual Update') && (
+                    <div>
+                      <label className="block text-[10px] font-bold text-stone-400 uppercase mb-1">
+                        {formData.type === 'Manual Update' ? 'Reported Classification' : 'Reason Classification'}
+                      </label>
+                      <select
+                        required
+                        className="w-full p-3 bg-stone-50 border-none rounded-xl text-sm"
+                        value={formData.reason}
+                        onChange={e => setFormData({...formData, reason: e.target.value as any})}
+                      >
+                        <option value="">Select Reason...</option>
+                        {formData.type === 'Manual Update' ? (
+                          <>
+                            <option value="Already applied for renewal">Already applied for renewal</option>
+                            <option value="Certification to Accreditation">Certification to Accreditation</option>
+                          </>
+                        ) : (
+                          reasons.map(r => (
+                            <option key={r} value={r}>{r}</option>
+                          ))
+                        )}
+                      </select>
+                    </div>
+                  )}
 
                   {needsReapplicationDetails && (
                     <div className="p-4 bg-amber-50 rounded-2xl border border-amber-100 space-y-4 animate-in zoom-in-95 duration-200">

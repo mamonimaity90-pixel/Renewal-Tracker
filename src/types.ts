@@ -35,8 +35,8 @@ export interface Interaction {
   hospitalId: string;
   userId: string;
   timestamp: string;
-  type: 'Call' | 'Email' | 'Meeting';
-  result: 'Connected' | 'Not Connected';
+  type: 'Call' | 'Email' | 'Meeting' | 'Manual Update';
+  result: 'Connected' | 'Not Connected' | 'Direct Update';
   reason?: 
     | 'Applied elsewhere'
     | 'Concerned person not available'
@@ -62,6 +62,8 @@ export interface Interaction {
   verificationStatus?: 'Pending' | 'Verified' | 'Rejected';
   verifiedBy?: string;
   verifiedAt?: string;
+  verificationRemarks?: string;
+  adminChangeRemarks?: string;
   assignedToName?: string; // Captured at time of logging
 }
 

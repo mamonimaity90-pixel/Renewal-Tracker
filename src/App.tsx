@@ -387,7 +387,7 @@ export default function App() {
         />
       )}
       {activeTab === 'logs' && (
-        <ActivityLog hospitals={hospitals} interactions={interactions} users={users} />
+        <ActivityLog hospitals={hospitals} interactions={interactions} users={users} currentUser={user} />
       )}
       {activeTab === 'settings' && user.role === 'admin' && (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
