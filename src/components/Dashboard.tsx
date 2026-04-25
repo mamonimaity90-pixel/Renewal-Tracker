@@ -118,21 +118,26 @@ export const Dashboard = memo(function Dashboard({ hospitals, interactions, appl
 
   const stats = useMemo(() => {
     const total = filteredHospitals.length;
-    const expiredHospitals = filteredHospitals.filter(h => isAfter(now, parseISO(h.expiryDate)));
+    const dayNow = startOfDay(now);
+
+    const expiredHospitals = filteredHospitals.filter(h => isBefore(parseISO(h.expiryDate), dayNow));
     const expiredCount = expiredHospitals.length;
     
-    const dueSoon = filteredHospitals.filter(h => {
-      const days = differenceInDays(parseISO(h.expiryDate), now);
-      return days > 0 && days <= 30;
+    const dueForExpiryCount = filteredHospitals.filter(h => {
+      const expiryDate = parseISO(h.expiryDate);
+      return !h.reapplied && !isBefore(expiryDate, dayNow);
     }).length;
 
-    // Retention Rate = Renewed / Expired
+    // Renewed = reapplied leads
     const renewedCount = filteredHospitals.filter(h => h.reapplied).length;
+    
+    // Retention Rate = Renewed (from those that reached expiry) / (Expired + Renewed that were expired)
+    // Simplified: Renewed / (Renewed + Unrenewed Expired)
     const pendingRenewals = filteredHospitals.filter(h => !h.reapplied).length;
     const expiredRenewedCount = expiredHospitals.filter(h => h.reapplied).length;
     const retentionRate = expiredCount > 0 
       ? Math.round((expiredRenewedCount / expiredCount) * 100) 
-      : 100; // 100% if no hospitals have reached expiry yet
+      : 100;
 
     const followUpsOverdue = filteredHospitals.filter(h => 
       h.nextFollowUpDate && 
@@ -158,16 +163,17 @@ export const Dashboard = memo(function Dashboard({ hospitals, interactions, appl
 
     return { 
       total, 
-      expired: expiredCount, 
-      renewed: renewedCount, 
-      pendingRenewals, 
+      expired: expiredCount,
+      dueForExpiry: dueForExpiryCount,
+      renewed: renewedCount,
+      pendingRenewals,
       retentionRate,
       followUpsOverdue,
       followUpsToday,
       neverCalled: neverCalledCount,
       neverEverConnected: neverEverConnectedCount
     };
-  }, [filteredHospitals, now]);
+  }, [filteredHospitals, interactions, now]);
 
   const followUpQueue = useMemo(() => {
     return filteredHospitals
@@ -624,33 +630,22 @@ export const Dashboard = memo(function Dashboard({ hospitals, interactions, appl
       </div>
 
       {/* Quick Stats */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-4 lg:grid-cols-5 gap-6">
         {[
           { label: filterUser || filterState || filterBatch !== 'all' || filterDateStart || filterDateEnd ? 'Filtered Leads' : 'Total Hospitals', value: stats.total, icon: TrendingUp, color: 'text-stone-600' },
+          { label: 'Expired', value: stats.expired, icon: Ban, color: 'text-red-500' },
+          { label: 'Due for Expiry', value: stats.dueForExpiry, icon: Clock, color: 'text-amber-500' },
           { label: 'Renewed', value: stats.renewed, icon: CheckCircle2, color: 'text-emerald-500' },
-          { 
-            label: 'Follow-ups', 
-            value: stats.followUpsToday, 
-            icon: Clock, 
-            color: 'text-amber-600', 
-            sub: stats.followUpsOverdue > 0 ? `${stats.followUpsOverdue} Overdue` : 'All caught up',
-            subColor: stats.followUpsOverdue > 0 ? 'text-red-500' : 'text-emerald-500'
-          },
-          { label: 'Retention Rate', value: `${stats.retentionRate}%`, icon: CheckCircle2, color: 'text-blue-500' },
+          { label: 'Retention Rate', value: `${stats.retentionRate}%`, icon: UserCheck, color: 'text-blue-500' },
         ].map((stat, i) => (
-          <div key={i} className="bg-white p-6 rounded-3xl border border-stone-200 shadow-sm">
+          <div key={i} className="bg-white p-6 rounded-3xl border border-stone-200 shadow-sm transition-all hover:shadow-md">
             <div className="flex items-center justify-between mb-4">
               <div className={cn("p-2 rounded-xl bg-stone-50", stat.color)}>
                 <stat.icon className="w-6 h-6" />
               </div>
             </div>
-            <p className="text-stone-500 text-sm font-medium">{stat.label}</p>
+            <p className="text-stone-500 text-xs font-bold uppercase tracking-tight">{stat.label}</p>
             <p className="text-3xl font-serif font-bold text-stone-900 mt-1">{stat.value}</p>
-            {stat.sub && (
-              <p className={cn("text-[10px] uppercase font-bold mt-1", (stat as any).subColor || 'text-stone-400')}>
-                {stat.sub}
-              </p>
-            )}
           </div>
         ))}
       </div>

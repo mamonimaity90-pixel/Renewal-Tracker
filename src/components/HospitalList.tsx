@@ -689,14 +689,23 @@ export const HospitalList = memo(function HospitalList({ hospitals, users, inter
                     )}
                   </td>
                   <td className="p-4">
-                    <span className={cn(
-                      "px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider",
-                      hospital.status === 'Active' ? "bg-emerald-100 text-emerald-700" :
-                      hospital.status === 'Expired' ? "bg-red-100 text-red-700" :
-                      "bg-amber-100 text-amber-700"
-                    )}>
-                      {hospital.status}
-                    </span>
+                    {(() => {
+                      const expiryDate = parseISO(hospital.expiryDate);
+                      const dayNow = startOfDay(new Date());
+                      const isExpired = isBefore(expiryDate, dayNow);
+                      const isDueSoon = !hospital.reapplied && !isExpired;
+
+                      return (
+                        <span className={cn(
+                          "px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider",
+                          hospital.reapplied ? "bg-emerald-100 text-emerald-700" :
+                          isExpired ? "bg-red-100 text-red-700" :
+                          "bg-amber-100 text-amber-700"
+                        )}>
+                          {hospital.reapplied ? 'Renewed' : isExpired ? 'Expired' : 'Due for Expiry'}
+                        </span>
+                      );
+                    })()}
                   </td>
                   <td className="p-4 text-right">
                     <button 
