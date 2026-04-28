@@ -91,13 +91,13 @@ export const HospitalList = memo(function HospitalList({ hospitals, users, inter
           h.applicationNo?.toLowerCase().includes(search.toLowerCase()) ||
           h.contactPerson?.toLowerCase().includes(search.toLowerCase());
         
-        const matchesUser = filterUsers.length === 0 || filterUsers.includes(h.assignedTo || '');
+        const matchesUser = filterUsers.length === 0 || filterUsers.includes(h.assignedTo || 'unassigned');
         const matchesState = filterStates.length === 0 || filterStates.includes(h.state);
         
         let matchesBatch = true;
         if (filterBatch !== 'all') {
           const year = parseISO(h.expiryDate).getFullYear();
-          if (filterBatch === 'historical') matchesBatch = year < 2026;
+          if (filterBatch === 'historical') matchesBatch = year >= 2023 && year <= 2025;
           if (filterBatch === 'upcoming') matchesBatch = year >= 2026;
         }
 
@@ -176,7 +176,7 @@ export const HospitalList = memo(function HospitalList({ hospitals, users, inter
         if (valA > valB) return sortOrder === 'asc' ? 1 : -1;
         return 0;
       });
-  }, [hospitals, interactions, search, filterUsers, filterStates, filterRenewal, filterConnection, filterDateStart, filterDateEnd, filterEffortLed, filterFollowUp, sortField, sortOrder, effortLedHospitals]);
+  }, [hospitals, interactions, search, filterUsers, filterStates, filterRenewal, filterConnection, filterBatch, filterDateStart, filterDateEnd, filterEffortLed, filterFollowUp, sortField, sortOrder, effortLedHospitals]);
 
   const totalPages = Math.ceil(filteredHospitals.length / ITEMS_PER_PAGE);
   const paginatedHospitals = filteredHospitals.slice(
@@ -403,7 +403,10 @@ export const HospitalList = memo(function HospitalList({ hospitals, users, inter
           <div>
             <label className="block text-[10px] font-bold text-stone-400 uppercase mb-1">Assigned To</label>
             <MultiSelect
-              options={users.map(u => ({ label: u.name, value: u.uid }))}
+              options={[
+                { label: 'Unassigned Leads', value: 'unassigned' },
+                ...users.map(u => ({ label: u.name, value: u.uid }))
+              ]}
               selected={filterUsers}
               onChange={setFilterUsers}
               placeholder="All Team Members"

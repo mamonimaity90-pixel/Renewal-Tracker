@@ -48,13 +48,13 @@ export const Dashboard = memo(function Dashboard({ hospitals, interactions, appl
 
   const filteredHospitals = useMemo(() => {
     return hospitals.filter(h => {
-      const matchesUser = !filterUser || h.assignedTo === filterUser;
+      const matchesUser = !filterUser || (filterUser === 'unassigned' ? !h.assignedTo : h.assignedTo === filterUser);
       const matchesState = !filterState || h.state === filterState;
 
       let matchesBatch = true;
       if (filterBatch !== 'all') {
         const year = parseISO(h.expiryDate).getFullYear();
-        if (filterBatch === 'historical') matchesBatch = year < 2026;
+        if (filterBatch === 'historical') matchesBatch = year >= 2023 && year <= 2025;
         if (filterBatch === 'upcoming') matchesBatch = year >= 2026;
       }
 
@@ -120,23 +120,26 @@ export const Dashboard = memo(function Dashboard({ hospitals, interactions, appl
     const total = filteredHospitals.length;
     const dayNow = startOfDay(now);
 
-    const expiredHospitals = filteredHospitals.filter(h => isBefore(parseISO(h.expiryDate), dayNow));
-    const expiredCount = expiredHospitals.length;
-    
-    const dueForExpiryCount = filteredHospitals.filter(h => {
-      const expiryDate = parseISO(h.expiryDate);
-      return !h.reapplied && !isBefore(expiryDate, dayNow);
-    }).length;
-
-    // Renewed = reapplied leads
+    // Categories for mutually exclusive totals
+    // Total = Renewed + Pending
     const renewedCount = filteredHospitals.filter(h => h.reapplied).length;
+    const pendingHospitals = filteredHospitals.filter(h => !h.reapplied);
+    const pendingRenewalsCount = pendingHospitals.length;
+
+    // Total = Expired (by date) + Due for Expiry (by date)
+    const expiredByDateCount = filteredHospitals.filter(h => isBefore(parseISO(h.expiryDate), dayNow)).length;
+    const dueForExpiryByDateCount = filteredHospitals.filter(h => !isBefore(parseISO(h.expiryDate), dayNow)).length;
+
+    const actionableExpiredCount = pendingHospitals.filter(h => isBefore(parseISO(h.expiryDate), dayNow)).length;
+    const pendingDueForExpiryCount = pendingHospitals.filter(h => !isBefore(parseISO(h.expiryDate), dayNow)).length;
+
+    // For Retention Rate, we look at all hospitals whose expiry has passed
+    const allExpiredDates = filteredHospitals.filter(h => isBefore(parseISO(h.expiryDate), dayNow));
+    const totalExpiredByDate = allExpiredDates.length;
+    const expiredRenewedCount = allExpiredDates.filter(h => h.reapplied).length;
     
-    // Retention Rate = Renewed (from those that reached expiry) / (Expired + Renewed that were expired)
-    // Simplified: Renewed / (Renewed + Unrenewed Expired)
-    const pendingRenewals = filteredHospitals.filter(h => !h.reapplied).length;
-    const expiredRenewedCount = expiredHospitals.filter(h => h.reapplied).length;
-    const retentionRate = expiredCount > 0 
-      ? Math.round((expiredRenewedCount / expiredCount) * 100) 
+    const retentionRate = totalExpiredByDate > 0 
+      ? Math.round((expiredRenewedCount / totalExpiredByDate) * 100) 
       : 100;
 
     const followUpsOverdue = filteredHospitals.filter(h => 
@@ -163,10 +166,11 @@ export const Dashboard = memo(function Dashboard({ hospitals, interactions, appl
 
     return { 
       total, 
-      expired: expiredCount,
-      dueForExpiry: dueForExpiryCount,
+      expired: expiredByDateCount,
+      dueForExpiry: dueForExpiryByDateCount,
       renewed: renewedCount,
-      pendingRenewals,
+      pendingRenewals: pendingRenewalsCount,
+      actionableExpired: actionableExpiredCount,
       retentionRate,
       followUpsOverdue,
       followUpsToday,
@@ -579,6 +583,7 @@ export const Dashboard = memo(function Dashboard({ hospitals, interactions, appl
             onChange={(e) => setFilterUser(e.target.value)}
           >
             <option value="">All Members</option>
+            <option value="unassigned">Unassigned Leads</option>
             {users.map(u => (
               <option key={u.uid} value={u.uid}>{u.name}</option>
             ))}
@@ -630,13 +635,13 @@ export const Dashboard = memo(function Dashboard({ hospitals, interactions, appl
       </div>
 
       {/* Quick Stats */}
-      <div className="grid grid-cols-1 md:grid-cols-4 lg:grid-cols-5 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-6">
         {[
-          { label: filterUser || filterState || filterBatch !== 'all' || filterDateStart || filterDateEnd ? 'Filtered Leads' : 'Total Hospitals', value: stats.total, icon: TrendingUp, color: 'text-stone-600' },
-          { label: 'Expired', value: stats.expired, icon: Ban, color: 'text-red-500' },
-          { label: 'Due for Expiry', value: stats.dueForExpiry, icon: Clock, color: 'text-amber-500' },
-          { label: 'Renewed', value: stats.renewed, icon: CheckCircle2, color: 'text-emerald-500' },
-          { label: 'Retention Rate', value: `${stats.retentionRate}%`, icon: UserCheck, color: 'text-blue-500' },
+          { label: filterUser || filterState || filterBatch !== 'all' || filterDateStart || filterDateEnd ? 'Filtered Leads' : 'Total Dataset', value: stats.total, icon: TrendingUp, color: 'text-stone-600', sub: 'Entire Cohort' },
+          { label: 'Expired', value: stats.expired, icon: Ban, color: 'text-red-500', sub: 'Expiry date passed' },
+          { label: 'Due for Expiry', value: stats.dueForExpiry, icon: Clock, color: 'text-amber-500', sub: 'Upcoming Expiries' },
+          { label: 'Renewed', value: stats.renewed, icon: CheckCircle2, color: 'text-emerald-500', sub: 'Compliance Secured' },
+          { label: 'Pending', value: stats.pendingRenewals, icon: FileText, color: 'text-blue-500', sub: 'Actionable Leads' },
         ].map((stat, i) => (
           <div key={i} className="bg-white p-6 rounded-3xl border border-stone-200 shadow-sm transition-all hover:shadow-md">
             <div className="flex items-center justify-between mb-4">
@@ -646,6 +651,11 @@ export const Dashboard = memo(function Dashboard({ hospitals, interactions, appl
             </div>
             <p className="text-stone-500 text-xs font-bold uppercase tracking-tight">{stat.label}</p>
             <p className="text-3xl font-serif font-bold text-stone-900 mt-1">{stat.value}</p>
+            {stat.sub && (
+              <p className="text-[10px] text-stone-400 font-bold mt-1 uppercase">
+                {stat.sub}
+              </p>
+            )}
           </div>
         ))}
       </div>
