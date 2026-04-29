@@ -60,11 +60,17 @@ export function ActivityLog({ hospitals, interactions, users, currentUser }: Act
     return interactions
       .filter(log => {
         const hospital = hospitals.find(h => h.id === log.hospitalId);
+        const reporter = users.find(u => u.uid === log.userId);
         const matchesType = filterType === 'all' || log.type === filterType;
         const matchesUser = filterUser === 'all' || log.userId === filterUser;
+        
         const matchesSearch = !searchTerm || 
           hospital?.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-          log.remarks?.toLowerCase().includes(searchTerm.toLowerCase());
+          hospital?.id.toLowerCase().includes(searchTerm.toLowerCase()) ||
+          reporter?.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+          log.remarks?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+          log.result?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+          log.type?.toLowerCase().includes(searchTerm.toLowerCase());
         
         let matchesDate = true;
         if (dateStart || dateEnd) {

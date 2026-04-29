@@ -100,9 +100,10 @@ export default function App() {
       handleFirestoreError(error, OperationType.GET, 'hospitals');
     });
 
-    // Limit interactions to the last 500 to save on read units
-    const unsubInteractions = onSnapshot(query(collection(db, 'interactions'), orderBy('timestamp', 'desc'), limit(500)), (snapshot) => {
-      setInteractions(snapshot.docs.map(doc => {
+    // Remove limit and orderBy to ensure all interaction history is available for filtering and verification
+    // even if some legacy records are missing the timestamp field (Firestore excludes docs missing order field)
+    const unsubInteractions = onSnapshot(collection(db, 'interactions'), (snapshot) => {
+      const allInteractions = snapshot.docs.map(doc => {
         const data = doc.data();
         return { 
           id: doc.id, 
@@ -111,6 +112,15 @@ export default function App() {
           verifiedAt: normalizeDate(data.verifiedAt),
           followUpDate: normalizeDate(data.followUpDate)
         } as Interaction;
+      });
+      
+      // Sort in memory by timestamp descending
+      setInteractions(allInteractions.sort((a, b) => {
+        const timeA = a.timestamp || '';
+        const timeB = b.timestamp || '';
+        if (timeA < timeB) return 1;
+        if (timeA > timeB) return -1;
+        return 0;
       }));
     }, (error) => {
       if (error.message?.includes('Quota limit exceeded') || error.code === 'resource-exhausted') {

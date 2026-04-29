@@ -161,7 +161,7 @@ export const Dashboard = memo(function Dashboard({ hospitals, interactions, appl
 
     const neverEverConnectedCount = filteredHospitals.filter(h => !h.reapplied).filter(h => {
       const hospitalInteractions = interactions.filter(i => i.hospitalId === h.id);
-      return hospitalInteractions.length > 0 && !hospitalInteractions.some(i => i.result === 'Connected');
+      return hospitalInteractions.length > 0 && !hospitalInteractions.some(i => i.result === 'Connected' || i.result === 'Direct Update');
     }).length;
 
     return { 
@@ -201,12 +201,12 @@ export const Dashboard = memo(function Dashboard({ hospitals, interactions, appl
       
       const neverConnected = assignedHospitals.filter(h => {
         const hInteractions = interactions.filter(i => i.hospitalId === h.id);
-        return hInteractions.length > 0 && !hInteractions.some(i => i.result === 'Connected');
+        return hInteractions.length > 0 && !hInteractions.some(i => i.result === 'Connected' || i.result === 'Direct Update');
       }).length;
       
       const connected = assignedHospitals.filter(h => {
         const hInteractions = interactions.filter(i => i.hospitalId === h.id);
-        return hInteractions.some(i => i.result === 'Connected');
+        return hInteractions.some(i => i.result === 'Connected' || i.result === 'Direct Update');
       }).length;
       
       const effortLedCount = assignedHospitals.filter(h => {
@@ -214,7 +214,7 @@ export const Dashboard = memo(function Dashboard({ hospitals, interactions, appl
         const renewalDate = parseISO(h.renewalApplicationDate);
         return interactions.some(i => 
           i.hospitalId === h.id && 
-          i.result === 'Connected' &&
+          (i.result === 'Connected' || i.result === 'Direct Update') &&
           isBefore(parseISO(i.timestamp), renewalDate)
         );
       }).length;
@@ -248,7 +248,7 @@ export const Dashboard = memo(function Dashboard({ hospitals, interactions, appl
         return i.userId === user.uid && isWithinInterval(logDate, { start, end });
       });
 
-      const connected = userInteractions.filter(i => i.result === 'Connected').length;
+      const connected = userInteractions.filter(i => i.result === 'Connected' || i.result === 'Direct Update').length;
       const notConnected = userInteractions.filter(i => i.result === 'Not Connected').length;
       const total = userInteractions.length;
 
@@ -445,7 +445,7 @@ export const Dashboard = memo(function Dashboard({ hospitals, interactions, appl
         .sort((a, b) => parseISO(b.timestamp).getTime() - parseISO(a.timestamp).getTime())[0];
     });
 
-    const connected = latestInteractions.filter(i => i?.result === 'Connected').length;
+    const connected = latestInteractions.filter(i => i?.result === 'Connected' || i?.result === 'Direct Update').length;
     const notConnected = latestInteractions.filter(i => i?.result === 'Not Connected').length;
     const noInteraction = notRenewedHospitals.length - connected - notConnected;
 
@@ -461,7 +461,7 @@ export const Dashboard = memo(function Dashboard({ hospitals, interactions, appl
     const notAppliedHospitalIds = new Set(filteredHospitals.filter(h => !h.reapplied).map(h => h.id));
     
     filteredInteractions.forEach(i => {
-      if (i.result === 'Connected' && i.reason && notAppliedHospitalIds.has(i.hospitalId)) {
+      if ((i.result === 'Connected' || i.result === 'Direct Update') && i.reason && notAppliedHospitalIds.has(i.hospitalId)) {
         counts[i.reason] = (counts[i.reason] || 0) + 1;
       }
     });
@@ -480,7 +480,7 @@ export const Dashboard = memo(function Dashboard({ hospitals, interactions, appl
       const renewalDate = parseISO(h.renewalApplicationDate!);
       const hospitalInteractions = interactions.filter(i => 
         i.hospitalId === h.id && 
-        i.result === 'Connected' &&
+        (i.result === 'Connected' || i.result === 'Direct Update') &&
         isBefore(parseISO(i.timestamp), renewalDate)
       );
 

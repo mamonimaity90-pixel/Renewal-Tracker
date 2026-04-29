@@ -116,10 +116,10 @@ export const HospitalList = memo(function HospitalList({ hospitals, users, inter
           if (filterConnection === 'none') {
             matchesConnection = hospitalInteractions.length === 0;
           } else if (filterConnection === 'never-ever-connected') {
-            // Has interactions but none of them are "Connected"
-            matchesConnection = hospitalInteractions.length > 0 && !hospitalInteractions.some(i => i.result === 'Connected');
+            // Has interactions but none of them are successful connections or direct updates
+            matchesConnection = hospitalInteractions.length > 0 && !hospitalInteractions.some(i => i.result === 'Connected' || i.result === 'Direct Update');
           } else if (filterConnection === 'connected') {
-            matchesConnection = latestInteraction?.result === 'Connected';
+            matchesConnection = latestInteraction?.result === 'Connected' || latestInteraction?.result === 'Direct Update';
           } else if (filterConnection === 'not-connected') {
             matchesConnection = latestInteraction?.result === 'Not Connected';
           }
@@ -1152,9 +1152,17 @@ function LogInteractionModal({ hospital, interactions, users, isAdmin, onClose }
                 <div>
                   <label className="block text-[10px] font-bold text-stone-400 uppercase mb-1">Type</label>
                   <select
-                    className="w-full p-3 bg-stone-50 border-none rounded-xl text-sm"
+                    className="w-full p-3 bg-stone-50 border-none rounded-xl text-sm font-bold"
                     value={formData.type}
-                    onChange={e => setFormData({...formData, type: e.target.value as any})}
+                    onChange={e => {
+                      const newType = e.target.value as any;
+                      setFormData({
+                        ...formData, 
+                        type: newType,
+                        result: newType === 'Manual Update' ? 'Direct Update' : 'Connected',
+                        reason: ''
+                      });
+                    }}
                   >
                     <option value="Call">Call</option>
                     <option value="Email">Email</option>
@@ -1165,7 +1173,7 @@ function LogInteractionModal({ hospital, interactions, users, isAdmin, onClose }
                 <div>
                   <label className="block text-[10px] font-bold text-stone-400 uppercase mb-1">Disposition</label>
                   <select
-                    className="w-full p-3 bg-stone-50 border-none rounded-xl text-sm"
+                    className="w-full p-3 bg-stone-50 border-none rounded-xl text-sm font-bold"
                     disabled={formData.type === 'Manual Update'}
                     value={formData.result}
                     onChange={e => setFormData({...formData, result: e.target.value as any})}
