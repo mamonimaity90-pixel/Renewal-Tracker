@@ -33,7 +33,10 @@
         "currentProgram": { "type": "string" },
         "status": { "type": "string", "enum": ["Active", "Expired", "Pending Renewal"] },
         "contactPerson": { "type": "string" },
-        "contactNumber": { "type": "string" }
+        "contactNumber": { "type": "string" },
+        "alternateNumber": { "type": "string" },
+        "designation": { "type": "string" },
+        "nextFollowUpDate": { "type": "string", "format": "date-time" }
       },
       "required": ["name", "status"]
     },
@@ -47,8 +50,19 @@
         "hospitalName": { "type": "string" },
         "userId": { "type": "string" },
         "userName": { "type": "string" },
-        "type": { "type": "string", "enum": ["call", "visit", "email", "other"] },
-        "notes": { "type": "string" },
+        "type": { "type": "string", "enum": ["Call", "Email", "Meeting"] },
+        "result": { "type": "string", "enum": ["Connected", "Not Connected"] },
+        "reason": { "type": "string" },
+        "remarks": { "type": "string" },
+        "adminChangeRemarks": { "type": "string" },
+        "reapplied": { "type": "boolean" },
+        "reapplicationProgram": { "type": "string" },
+        "reapplicationNumber": { "type": "string" },
+        "reapplicationDate": { "type": "string", "format": "date" },
+        "verificationStatus": { "type": "string", "enum": ["Pending", "Verified", "Rejected"] },
+        "verifiedAt": { "type": "string", "format": "date-time" },
+        "verifiedBy": { "type": "string" },
+        "followUpDate": { "type": "string", "format": "date-time" },
         "timestamp": { "type": "string", "format": "date-time" }
       },
       "required": ["hospitalId", "userId", "type", "timestamp"]

@@ -65,12 +65,33 @@ export const HospitalList = memo(function HospitalList({ hospitals, users, inter
 
   const availableStates = useMemo(() => Array.from(new Set(hospitals.map(h => h.state))).sort(), [hospitals]);
 
+  const latestInteractionsMap = useMemo(() => {
+    const map = new Map<string, Interaction>();
+    // interactions prop is already sorted DESC by App.tsx
+    interactions.forEach(i => {
+      if (!map.has(i.hospitalId)) {
+        map.set(i.hospitalId, i);
+      }
+    });
+    return map;
+  }, [interactions]);
+
+  const hospitalInteractionsMap = useMemo(() => {
+    const map = new Map<string, Interaction[]>();
+    interactions.forEach(i => {
+      if (!map.has(i.hospitalId)) map.set(i.hospitalId, []);
+      map.get(i.hospitalId)!.push(i);
+    });
+    return map;
+  }, [interactions]);
+
   const effortLedHospitals = useMemo(() => {
     const set = new Set<string>();
     hospitals.forEach(h => {
       if (h.reapplied && h.renewalApplicationDate) {
         const renewalDate = parseISO(h.renewalApplicationDate);
-        const hospitalInteractions = interactions.filter(i => i.hospitalId === h.id);
+        const hospitalInteractions = hospitalInteractionsMap.get(h.id) || [];
+        // interactions are sorted DESC, so we can't easily break early, but this is still O(M) total
         const hasInteractionBeforeRenewal = hospitalInteractions.some(i => 
           i.result === 'Connected' &&
           isBefore(parseISO(i.timestamp), renewalDate)
@@ -79,7 +100,7 @@ export const HospitalList = memo(function HospitalList({ hospitals, users, inter
       }
     });
     return set;
-  }, [hospitals, interactions]);
+  }, [hospitals, hospitalInteractionsMap]);
 
   const filteredHospitals = useMemo(() => {
     return hospitals
@@ -108,10 +129,8 @@ export const HospitalList = memo(function HospitalList({ hospitals, users, inter
 
         let matchesConnection = true;
         if (filterConnection !== 'all') {
-          const hospitalInteractions = interactions.filter(i => i.hospitalId === h.id);
-          const latestInteraction = hospitalInteractions.sort((a, b) => 
-            parseISO(b.timestamp).getTime() - parseISO(a.timestamp).getTime()
-          )[0];
+          const hospitalInteractions = hospitalInteractionsMap.get(h.id) || [];
+          const latestInteraction = latestInteractionsMap.get(h.id);
 
           if (filterConnection === 'none') {
             matchesConnection = hospitalInteractions.length === 0;
@@ -152,10 +171,7 @@ export const HospitalList = memo(function HospitalList({ hospitals, users, inter
         return matchesSearch && matchesUser && matchesState && matchesBatch && matchesRenewal && matchesConnection && matchesDate && matchesEffort && matchesFollowUp;
       })
       .map(h => {
-        const hospitalInteractions = interactions.filter(i => i.hospitalId === h.id);
-        const lastAtt = hospitalInteractions.sort((a, b) => 
-          parseISO(b.timestamp).getTime() - parseISO(a.timestamp).getTime()
-        )[0];
+        const lastAtt = latestInteractionsMap.get(h.id);
         
         return {
           ...h,
@@ -176,7 +192,7 @@ export const HospitalList = memo(function HospitalList({ hospitals, users, inter
         if (valA > valB) return sortOrder === 'asc' ? 1 : -1;
         return 0;
       });
-  }, [hospitals, interactions, search, filterUsers, filterStates, filterRenewal, filterConnection, filterBatch, filterDateStart, filterDateEnd, filterEffortLed, filterFollowUp, sortField, sortOrder, effortLedHospitals]);
+  }, [hospitals, hospitalInteractionsMap, latestInteractionsMap, search, filterUsers, filterStates, filterRenewal, filterConnection, filterBatch, filterDateStart, filterDateEnd, filterEffortLed, filterFollowUp, sortField, sortOrder, effortLedHospitals]);
 
   const totalPages = Math.ceil(filteredHospitals.length / ITEMS_PER_PAGE);
   const paginatedHospitals = filteredHospitals.slice(
@@ -900,7 +916,11 @@ function LogInteractionModal({ hospital, interactions, users, isAdmin, onClose }
   const [showHistory, setShowHistory] = useState(false);
   const [editingHistoryId, setEditingHistoryId] = useState<string | null>(null);
   const [editReason, setEditReason] = useState('');
-  const [editRemarks, setEditRemarks] = useState('');
+  const [editRemarks, setEditRemarks] = useState(''); // This is adminChangeRemarks
+  const [editOriginalRemarks, setEditOriginalRemarks] = useState('');
+  const [editAppProgram, setEditAppProgram] = useState('');
+  const [editAppNumber, setEditAppNumber] = useState('');
+  const [editAppDate, setEditAppDate] = useState('');
   const [isUpdatingHistory, setIsUpdatingHistory] = useState(false);
   const [reapplicationData, setReapplicationData] = useState({
     reapplied: false,
@@ -992,13 +1012,28 @@ function LogInteractionModal({ hospital, interactions, users, isAdmin, onClose }
     if (!editReason) return;
     setIsUpdatingHistory(true);
     try {
-      await updateDoc(doc(db, 'interactions', interactionId), {
+      const updateData: any = {
         reason: editReason,
+        remarks: editOriginalRemarks.trim(),
         adminChangeRemarks: editRemarks.trim()
-      });
+      };
+
+      if (editReason === 'Certification to Accreditation' || editReason === 'Already applied for renewal') {
+        updateData.reapplied = true;
+        updateData.reapplicationProgram = editAppProgram;
+        updateData.reapplicationNumber = editAppNumber;
+        updateData.reapplicationDate = editAppDate;
+        updateData.verificationStatus = 'Pending';
+      }
+
+      await updateDoc(doc(db, 'interactions', interactionId), updateData);
       setEditingHistoryId(null);
       setEditReason('');
       setEditRemarks('');
+      setEditOriginalRemarks('');
+      setEditAppProgram('');
+      setEditAppNumber('');
+      setEditAppDate('');
     } catch (error) {
       console.error('History update failed:', error);
       alert('Failed to update interaction history.');
@@ -1057,21 +1092,65 @@ function LogInteractionModal({ hospital, interactions, users, isAdmin, onClose }
                       </div>
                       
                       {editingHistoryId === interaction.id ? (
-                        <div className="space-y-3 bg-white p-3 rounded-xl border border-stone-200 shadow-sm mt-1">
-                          <div>
-                            <label className="text-[10px] font-bold text-stone-400 uppercase tracking-widest block mb-1">New Category</label>
-                            <select
-                              className="w-full bg-stone-50 border-none rounded-lg p-2 text-xs font-bold text-stone-900"
-                              value={editReason}
-                              onChange={(e) => setEditReason(e.target.value)}
-                            >
-                              {reasons.map(r => (
-                                <option key={r} value={r}>{r}</option>
-                              ))}
-                            </select>
+                         <div className="space-y-3 bg-white p-3 rounded-xl border border-stone-200 shadow-sm mt-1">
+                          <div className="grid grid-cols-2 gap-3">
+                            <div>
+                              <label className="text-[10px] font-bold text-stone-400 uppercase tracking-widest block mb-1">New Category</label>
+                              <select
+                                className="w-full bg-stone-50 border-none rounded-lg p-2 text-xs font-bold text-stone-900"
+                                value={editReason}
+                                onChange={(e) => setEditReason(e.target.value)}
+                              >
+                                {reasons.map(r => (
+                                  <option key={r} value={r}>{r}</option>
+                                ))}
+                              </select>
+                            </div>
+                            <div>
+                              <label className="text-[10px] font-bold text-stone-400 uppercase tracking-widest block mb-1">Original Remarks</label>
+                              <input
+                                type="text"
+                                className="w-full bg-stone-50 border-none rounded-lg p-2 text-xs"
+                                value={editOriginalRemarks}
+                                onChange={(e) => setEditOriginalRemarks(e.target.value)}
+                              />
+                            </div>
                           </div>
+
+                          {(editReason === 'Certification to Accreditation' || editReason === 'Already applied for renewal') && (
+                            <div className="p-3 bg-amber-50 rounded-lg border border-amber-100 space-y-3">
+                              <p className="text-[9px] font-bold text-amber-700 uppercase">Application Details Required</p>
+                              <div className="grid grid-cols-2 gap-2">
+                                <select
+                                  className="bg-white border border-amber-200 rounded-lg p-1.5 text-[10px]"
+                                  value={editAppProgram}
+                                  onChange={e => setEditAppProgram(e.target.value)}
+                                >
+                                  <option value="">Program</option>
+                                  <option value="HCO">HCO</option>
+                                  <option value="SHCO">SHCO</option>
+                                  <option value="ECO">ECO</option>
+                                  <option value="ELCP">ELCP</option>
+                                </select>
+                                <input
+                                  type="text"
+                                  placeholder="App Number"
+                                  className="bg-white border border-amber-200 rounded-lg p-1.5 text-[10px]"
+                                  value={editAppNumber}
+                                  onChange={e => setEditAppNumber(e.target.value)}
+                                />
+                                <input
+                                  type="date"
+                                  className="bg-white border border-amber-200 rounded-lg p-1.5 text-[10px] col-span-2"
+                                  value={editAppDate}
+                                  onChange={e => setEditAppDate(e.target.value)}
+                                />
+                              </div>
+                            </div>
+                          )}
+
                           <div>
-                            <label className="text-[10px] font-bold text-stone-400 uppercase tracking-widest block mb-1">Correction Remark (for team visibility)</label>
+                            <label className="text-[10px] font-bold text-stone-400 uppercase tracking-widest block mb-1">Correction Note (for team visibility)</label>
                             <input
                               type="text"
                               className="w-full bg-stone-50 border-none rounded-lg p-2 text-xs"
@@ -1111,7 +1190,7 @@ function LogInteractionModal({ hospital, interactions, users, isAdmin, onClose }
                               }}
                               className="text-[10px] font-bold text-stone-400 hover:text-stone-900 px-2 py-0.5 rounded border border-stone-200 border-dashed opacity-0 group-hover/hist:opacity-100 transition-opacity"
                             >
-                              Edit Category
+                              Edit Category & Remarks
                             </button>
                           )}
                         </div>

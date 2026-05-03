@@ -16,6 +16,9 @@ interface VerificationQueueProps {
 export function VerificationQueue({ interactions, hospitals, users, currentUser }: VerificationQueueProps) {
   const pendingVerifications = interactions.filter(i => i.verificationStatus === 'Pending');
 
+  const hospitalMap = React.useMemo(() => new Map(hospitals.map(h => [h.id, h])), [hospitals]);
+  const userMap = React.useMemo(() => new Map(users.map(u => [u.uid, u])), [users]);
+
   if (pendingVerifications.length === 0) {
     return (
       <div className="bg-white p-12 rounded-3xl border border-stone-200 shadow-sm text-center">
@@ -46,7 +49,8 @@ export function VerificationQueue({ interactions, hospitals, users, currentUser 
           <VerificationItem 
             key={log.id} 
             interaction={log} 
-            hospitals={hospitals} 
+            hospital={hospitalMap.get(log.hospitalId)} 
+            caller={userMap.get(log.userId)} 
             users={users} 
             currentUser={currentUser} 
           />
@@ -73,9 +77,7 @@ const REASONS = [
 ];
 
 function VerificationItem(props: any) {
-  const { interaction, hospitals, users, currentUser } = props;
-  const hospital = hospitals.find(h => h.id === interaction.hospitalId);
-  const caller = users.find(u => u.uid === interaction.userId);
+  const { interaction, hospital, caller, users, currentUser } = props;
   const [loading, setLoading] = useState(false);
   const [rejecting, setRejecting] = useState(false);
   const [editingReason, setEditingReason] = useState(false);

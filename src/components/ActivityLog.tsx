@@ -32,22 +32,43 @@ const REASONS = [
 export function ActivityLog({ hospitals, interactions, users, currentUser }: ActivityLogProps) {
   const [filterType, setFilterType] = useState<string>('all');
   const [filterUser, setFilterUser] = useState<string>('all');
+  const [filterReason, setFilterReason] = useState<string>('all');
   const [searchTerm, setSearchTerm] = useState('');
   const [dateStart, setDateStart] = useState('');
   const [dateEnd, setDateEnd] = useState('');
   const [editingReasonId, setEditingReasonId] = useState<string | null>(null);
+  const [editReason, setEditReason] = useState('');
   const [changeRemarks, setChangeRemarks] = useState('');
+  const [editOriginalRemarks, setEditOriginalRemarks] = useState('');
+  const [editAppProgram, setEditAppProgram] = useState('');
+  const [editAppNumber, setEditAppNumber] = useState('');
+  const [editAppDate, setEditAppDate] = useState('');
   const [updatingReason, setUpdatingReason] = useState(false);
 
   const handleUpdateReason = async (interactionId: string, newReason: string) => {
     setUpdatingReason(true);
     try {
-      await updateDoc(doc(db, 'interactions', interactionId), {
+      const updateData: any = {
         reason: newReason,
+        remarks: editOriginalRemarks.trim(),
         adminChangeRemarks: changeRemarks.trim()
-      });
+      };
+
+      if (newReason === 'Certification to Accreditation' || newReason === 'Already applied for renewal') {
+        updateData.reapplied = true;
+        updateData.reapplicationProgram = editAppProgram;
+        updateData.reapplicationNumber = editAppNumber;
+        updateData.reapplicationDate = editAppDate;
+        updateData.verificationStatus = 'Pending';
+      }
+
+      await updateDoc(doc(db, 'interactions', interactionId), updateData);
       setEditingReasonId(null);
       setChangeRemarks('');
+      setEditOriginalRemarks('');
+      setEditAppProgram('');
+      setEditAppNumber('');
+      setEditAppDate('');
     } catch (error) {
       console.error('Failed to update reason:', error);
       alert('Failed to update reason. Please check permissions.');
@@ -56,13 +77,17 @@ export function ActivityLog({ hospitals, interactions, users, currentUser }: Act
     }
   };
 
+  const hospitalMap = useMemo(() => new Map(hospitals.map(h => [h.id, h])), [hospitals]);
+  const userMap = useMemo(() => new Map(users.map(u => [u.uid, u])), [users]);
+
   const filteredLogs = useMemo(() => {
     return interactions
       .filter(log => {
-        const hospital = hospitals.find(h => h.id === log.hospitalId);
-        const reporter = users.find(u => u.uid === log.userId);
+        const hospital = hospitalMap.get(log.hospitalId);
+        const reporter = userMap.get(log.userId);
         const matchesType = filterType === 'all' || log.type === filterType;
         const matchesUser = filterUser === 'all' || log.userId === filterUser;
+        const matchesReason = filterReason === 'all' || log.reason === filterReason;
         
         const matchesSearch = !searchTerm || 
           hospital?.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -80,10 +105,10 @@ export function ActivityLog({ hospitals, interactions, users, currentUser }: Act
           matchesDate = isWithinInterval(logDate, { start, end });
         }
 
-        return matchesType && matchesUser && matchesSearch && matchesDate;
+        return matchesType && matchesUser && matchesReason && matchesSearch && matchesDate;
       })
       .sort((a, b) => parseISO(b.timestamp).getTime() - parseISO(a.timestamp).getTime());
-  }, [interactions, hospitals, filterType, filterUser, searchTerm, dateStart, dateEnd]);
+  }, [interactions, hospitalMap, userMap, filterType, filterUser, filterReason, searchTerm, dateStart, dateEnd]);
 
   return (
     <div className="space-y-6">
@@ -100,7 +125,7 @@ export function ActivityLog({ hospitals, interactions, users, currentUser }: Act
 
       {/* Filters */}
       <div className="bg-white p-6 rounded-3xl border border-stone-200 shadow-sm space-y-4">
-        <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-4">
           <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-stone-400" />
             <input
@@ -140,6 +165,16 @@ export function ActivityLog({ hospitals, interactions, users, currentUser }: Act
             value={dateStart}
             onChange={e => setDateStart(e.target.value)}
           />
+          <select
+            className="w-full p-2.5 bg-stone-50 border-none rounded-xl text-sm font-bold text-stone-700"
+            value={filterReason}
+            onChange={e => setFilterReason(e.target.value)}
+          >
+            <option value="all">All Reasons</option>
+            {REASONS.map(r => (
+              <option key={r} value={r}>{r}</option>
+            ))}
+          </select>
           <input
             type="date"
             className="w-full p-2.5 bg-stone-50 border-none rounded-xl text-sm"
@@ -197,8 +232,8 @@ export function ActivityLog({ hospitals, interactions, users, currentUser }: Act
                           <div className="flex items-center gap-2">
                             <select
                               className="flex-1 bg-white border border-stone-200 rounded-xl p-2 text-[10px] font-bold text-stone-700 focus:ring-2 focus:ring-stone-200"
-                              defaultValue={log.reason}
-                              id={`reason-select-${log.id}`}
+                              value={editReason}
+                              onChange={(e) => setEditReason(e.target.value)}
                             >
                               {REASONS.map(r => (
                                 <option key={r} value={r}>{r}</option>
@@ -207,12 +242,9 @@ export function ActivityLog({ hospitals, interactions, users, currentUser }: Act
                             <div className="flex items-center gap-1">
                               <button
                                 disabled={updatingReason}
-                                onClick={() => {
-                                  const select = document.getElementById(`reason-select-${log.id}`) as HTMLSelectElement;
-                                  handleUpdateReason(log.id, select.value);
-                                }}
+                                onClick={() => handleUpdateReason(log.id, editReason)}
                                 className="p-1.5 bg-emerald-50 text-emerald-600 rounded-lg transition-colors border border-emerald-100"
-                                title="Save Reason"
+                                title="Save Change"
                               >
                                 {updatingReason ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
                               </button>
@@ -229,11 +261,51 @@ export function ActivityLog({ hospitals, interactions, users, currentUser }: Act
                               </button>
                             </div>
                           </div>
+
+                          {(editReason === 'Certification to Accreditation' || editReason === 'Already applied for renewal') && (
+                            <div className="p-3 bg-amber-50 rounded-xl border border-amber-100 space-y-2">
+                              <p className="text-[9px] font-bold text-amber-700 uppercase">Application Details Required</p>
+                              <div className="grid grid-cols-2 gap-2 text-[10px]">
+                                <select
+                                  className="bg-white border border-amber-200 rounded-lg p-1"
+                                  value={editAppProgram}
+                                  onChange={e => setEditAppProgram(e.target.value)}
+                                >
+                                  <option value="">Program</option>
+                                  <option value="HCO">HCO</option>
+                                  <option value="SHCO">SHCO</option>
+                                  <option value="ECO">ECO</option>
+                                  <option value="ELCP">ELCP</option>
+                                </select>
+                                <input
+                                  type="text"
+                                  placeholder="App Number"
+                                  className="bg-white border border-amber-200 rounded-lg p-1"
+                                  value={editAppNumber}
+                                  onChange={e => setEditAppNumber(e.target.value)}
+                                />
+                                <input
+                                  type="date"
+                                  className="bg-white border border-amber-200 rounded-lg p-1 col-span-2"
+                                  value={editAppDate}
+                                  onChange={e => setEditAppDate(e.target.value)}
+                                />
+                              </div>
+                            </div>
+                          )}
                           <div className="space-y-1">
-                            <label className="text-[9px] font-bold text-stone-400 uppercase ml-1">Why are you changing this?</label>
+                            <label className="text-[9px] font-bold text-stone-400 uppercase ml-1">Original Remarks</label>
+                            <textarea 
+                              className="w-full p-2 bg-white border border-stone-200 rounded-xl text-xs focus:ring-2 focus:ring-stone-200 min-h-[60px]"
+                              value={editOriginalRemarks}
+                              onChange={(e) => setEditOriginalRemarks(e.target.value)}
+                            />
+                          </div>
+                          <div className="space-y-1">
+                            <label className="text-[9px] font-bold text-stone-400 uppercase ml-1">Admin Correction Remark (for team visibility)</label>
                             <input 
                               type="text"
-                              placeholder="Add a remark for the team..."
+                              placeholder="Why is this being changed?"
                               className="w-full p-2 bg-white border border-stone-200 rounded-xl text-xs focus:ring-2 focus:ring-stone-200"
                               value={changeRemarks}
                               onChange={(e) => setChangeRemarks(e.target.value)}
@@ -247,9 +319,17 @@ export function ActivityLog({ hospitals, interactions, users, currentUser }: Act
                           </span>
                           {currentUser?.role === 'admin' && (
                             <button
-                              onClick={() => setEditingReasonId(log.id)}
+                              onClick={() => {
+                                setEditingReasonId(log.id);
+                                setEditReason(log.reason || '');
+                                setEditOriginalRemarks(log.remarks || '');
+                                setChangeRemarks(log.adminChangeRemarks || '');
+                                setEditAppProgram(log.reapplicationProgram || '');
+                                setEditAppNumber(log.reapplicationNumber || '');
+                                setEditAppDate(log.reapplicationDate || '');
+                              }}
                               className="p-1 opacity-30 group-hover/reason:opacity-100 transition-opacity text-stone-400 hover:text-stone-900"
-                              title="Edit Category"
+                              title="Edit Category & Remarks"
                             >
                               <Edit2 className="w-3 h-3" />
                             </button>
