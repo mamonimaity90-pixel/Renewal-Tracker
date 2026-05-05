@@ -38,6 +38,11 @@ service cloud.firestore {
       allow read, write: if isAdmin();
     }
 
+    match /zones/{zoneId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
     // Default deny for everything else
     match /{document=**} {
       allow read, write: if false;

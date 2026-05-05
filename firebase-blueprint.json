@@ -8,9 +8,23 @@
         "uid": { "type": "string" },
         "name": { "type": "string" },
         "email": { "type": "string", "format": "email" },
-        "role": { "type": "string", "enum": ["admin", "team"] }
+        "role": { "type": "string", "enum": ["admin", "team"] },
+        "zoneId": { "type": "string", "description": "ID of the zone this user belongs to" }
       },
       "required": ["uid", "name", "email", "role"]
+    },
+    "Zone": {
+      "title": "Zone",
+      "description": "Regional zones like North, South, etc.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "states": { "type": "array", "items": { "type": "string" } },
+        "color": { "type": "string" },
+        "totalPoints": { "type": "number" }
+      },
+      "required": ["name"]
     },
     "Hospital": {
       "title": "Hospital",
@@ -133,6 +147,10 @@
     "settings/{settingId}": {
       "schema": "Setting",
       "description": "System settings like API keys"
+    },
+    "zones/{zoneId}": {
+      "schema": "Zone",
+      "description": "Regional zone definitions"
     }
   }
 }

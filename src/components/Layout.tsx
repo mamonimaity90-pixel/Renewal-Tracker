@@ -9,7 +9,8 @@ import {
   Settings,
   LogOut,
   Menu,
-  X
+  X,
+  TrendingUp
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 
@@ -26,6 +27,7 @@ export function Layout({ user, onLogout, activeTab, setActiveTab, children }: La
 
   const navItems = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
+    { id: 'performance', label: 'Performance', icon: TrendingUp },
     { id: 'hospitals', label: 'Hospitals', icon: HospitalIcon },
     { id: 'logs', label: 'Activity Logs', icon: ClipboardList },
     ...(user.role === 'admin' ? [

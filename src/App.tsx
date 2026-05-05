@@ -9,12 +9,13 @@ import {
   createUserWithEmailAndPassword
 } from 'firebase/auth';
 import { doc, getDoc, setDoc, onSnapshot, collection, query, orderBy, limit } from 'firebase/firestore';
-import { Hospital, User, Interaction, Application } from './types';
+import { Hospital, User, Interaction, Application, Zone } from './types';
 import { normalizeDate } from './lib/utils';
 import { Layout } from './components/Layout';
 import { Dashboard } from './components/Dashboard';
 import { HospitalList } from './components/HospitalList';
 import { TeamManagement } from './components/TeamManagement';
+import { PerformanceDashboard } from './components/PerformanceDashboard';
 import { ActivityLog } from './components/ActivityLog';
 import { VerificationQueue } from './components/VerificationQueue';
 import { ReportScheduler } from './components/ReportScheduler';
@@ -27,8 +28,9 @@ export default function App() {
   const [hospitals, setHospitals] = useState<Hospital[]>([]);
   const [interactions, setInteractions] = useState<Interaction[]>([]);
   const [applications, setApplications] = useState<Application[]>([]);
+  const [zones, setZones] = useState<Zone[]>([]);
   const [users, setUsers] = useState<User[]>([]);
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'hospitals' | 'team' | 'verification' | 'logs' | 'settings'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'performance' | 'hospitals' | 'team' | 'verification' | 'logs' | 'settings'>('dashboard');
   const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [authMode, setAuthMode] = useState<'login' | 'signup' | 'google'>('google');
   const [email, setEmail] = useState('');
@@ -154,11 +156,18 @@ export default function App() {
       handleFirestoreError(error, OperationType.GET, 'users');
     });
 
+    const unsubZones = onSnapshot(collection(db, 'zones'), (snapshot) => {
+      setZones(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Zone)));
+    }, (error) => {
+      handleFirestoreError(error, OperationType.GET, 'zones');
+    });
+
     return () => {
       unsubHospitals();
       unsubInteractions();
       unsubApplications();
       unsubUsers();
+      unsubZones();
     };
   }, [user]);
 
@@ -377,6 +386,14 @@ export default function App() {
           currentUser={user}
         />
       )}
+      {activeTab === 'performance' && (
+        <PerformanceDashboard 
+          hospitals={hospitals} 
+          interactions={interactions} 
+          zones={zones}
+          users={users}
+        />
+      )}
       {activeTab === 'hospitals' && (
         <HospitalList 
           hospitals={hospitals} 
@@ -386,7 +403,7 @@ export default function App() {
         />
       )}
       {activeTab === 'team' && user.role === 'admin' && (
-        <TeamManagement users={users} />
+        <TeamManagement users={users} zones={zones} />
       )}
       {activeTab === 'verification' && user.role === 'admin' && (
         <VerificationQueue 

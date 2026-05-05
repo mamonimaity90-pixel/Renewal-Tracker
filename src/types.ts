@@ -5,6 +5,22 @@ export interface User {
   name: string;
   email: string;
   role: UserRole;
+  zoneId?: string;
+}
+
+export interface Zone {
+  id: string;
+  name: string;
+  states: string[];
+  color: string;
+}
+
+export interface PerformanceStats {
+  zoneId: string;
+  points: number;
+  earlyRenewals: number;
+  vintageRecoveries: number;
+  expirations: number;
 }
 
 export interface Hospital {
