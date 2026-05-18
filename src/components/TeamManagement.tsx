@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { User, Zone } from '../types';
-import { Shield, User as UserIcon, Mail, Users, Plus, Trash2, CheckCircle2, ChevronRight, Globe, BarChart3 } from 'lucide-react';
+import { Shield, User as UserIcon, Mail, Users, Plus, Trash2, CheckCircle2, ChevronRight, Globe, BarChart3, Clock, XCircle, Edit2, Check, X } from 'lucide-react';
 import { db } from '../firebase';
 import { doc, updateDoc, collection, onSnapshot, setDoc, deleteDoc } from 'firebase/firestore';
 
@@ -28,13 +28,17 @@ export function TeamManagement({ users, zones }: TeamManagementProps) {
   const [isAddingZone, setIsAddingZone] = useState(false);
   const [newZoneName, setNewZoneName] = useState('');
   const [selectedStates, setSelectedStates] = useState<string[]>([]);
+  const [editingEmailId, setEditingEmailId] = useState<string | null>(null);
+  const [editEmailValue, setEditEmailValue] = useState('');
 
   const toggleRole = async (userId: string, currentRole: string) => {
     const newRole = currentRole === 'admin' ? 'team' : 'admin';
     try {
       await updateDoc(doc(db, 'users', userId), { role: newRole });
-    } catch (error) {
+      alert(`User role updated to ${newRole}.`);
+    } catch (error: any) {
       console.error('Role update failed:', error);
+      alert(`Error updating role: ${error.message || 'Unknown error'}`);
     }
   };
 
@@ -59,7 +63,7 @@ export function TeamManagement({ users, zones }: TeamManagementProps) {
   };
 
   const handleRemoveZone = async (zoneId: string) => {
-    if (!confirm('Are you sure you want to delete this zone?')) return;
+    if (!window.confirm('Are you sure you want to delete this zone?')) return;
     try {
       await deleteDoc(doc(db, 'zones', zoneId));
       // Unassign users from this zone
@@ -67,8 +71,10 @@ export function TeamManagement({ users, zones }: TeamManagementProps) {
       for (const u of usersInZone) {
         await updateDoc(doc(db, 'users', u.uid), { zoneId: null });
       }
-    } catch (error) {
+      alert("Zone removed successfully.");
+    } catch (error: any) {
       console.error('Failed to remove zone:', error);
+      alert(`Error removing zone: ${error.message || 'Unknown error'}`);
     }
   };
 
@@ -83,6 +89,48 @@ export function TeamManagement({ users, zones }: TeamManagementProps) {
       await updateDoc(doc(db, 'users', userId), { zoneId });
     } catch (error) {
       console.error('Failed to assign user:', error);
+    }
+  };
+
+  const updateUserStatus = async (userId: string, status: 'approved' | 'rejected') => {
+    try {
+      await updateDoc(doc(db, 'users', userId), { status });
+      alert(`User status updated to ${status}.`);
+    } catch (error: any) {
+      console.error('Failed to update status:', error);
+      alert(`Error updating status: ${error.message}`);
+    }
+  };
+
+  const deleteUser = async (userId: string) => {
+    if (userId === 'mDP3OgGwqvReP8FqRRDMgZv16V53' || userId === 'mamoni.maity90@gmail.com') {
+      alert("Cannot delete the primary admin account.");
+      return;
+    }
+    
+    if (!window.confirm('Are you sure you want to delete this user profile? This action cannot be undone.')) return;
+    
+    try {
+      await deleteDoc(doc(db, 'users', userId));
+      alert("User profile deleted successfully.");
+    } catch (error: any) {
+      console.error('Failed to delete user:', error);
+      alert(`Error: ${error.message || 'Failed to delete user. You may have exceeded your Firebase quota.'}`);
+    }
+  };
+
+  const handleUpdateEmail = async (userId: string) => {
+    if (!editEmailValue.includes('@')) {
+      alert("Please enter a valid email address.");
+      return;
+    }
+    try {
+      await updateDoc(doc(db, 'users', userId), { email: editEmailValue });
+      setEditingEmailId(null);
+      alert("Email updated successfully.");
+    } catch (error: any) {
+      console.error('Failed to update email:', error);
+      alert(`Error: ${error.message || 'Failed to update email.'}`);
     }
   };
 
@@ -104,10 +152,48 @@ export function TeamManagement({ users, zones }: TeamManagementProps) {
             onClick={() => setActiveSubTab('users')}
             className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${activeSubTab === 'users' ? 'bg-white shadow-sm text-stone-900' : 'text-stone-400 hover:text-stone-600'}`}
           >
-            Team Assignments
+            Management & Access
           </button>
         </div>
       </header>
+
+      {activeSubTab === 'users' && users.some(u => u.status === 'pending') && (
+        <div className="space-y-4">
+          <div className="flex items-center gap-2 mb-2">
+            <Clock className="w-4 h-4 text-blue-500" />
+            <h3 className="text-sm font-bold text-stone-900">Pending Approval Requests</h3>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {users.filter(u => u.status === 'pending').map(pendingUser => (
+              <div key={pendingUser.uid} className="bg-white p-5 rounded-3xl border border-blue-100 shadow-sm bg-blue-50/10">
+                <div className="flex items-center gap-3 mb-4">
+                  <div className="w-10 h-10 rounded-xl bg-blue-50 flex items-center justify-center text-xs font-bold text-blue-600">
+                    {pendingUser.name[0]}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-bold text-stone-900 truncate">{pendingUser.name}</p>
+                    <p className="text-xs text-stone-400 truncate">{pendingUser.email}</p>
+                  </div>
+                </div>
+                <div className="flex gap-2">
+                  <button 
+                    onClick={() => updateUserStatus(pendingUser.uid, 'approved')}
+                    className="flex-1 bg-blue-600 text-white py-2 rounded-xl text-[10px] font-bold hover:bg-blue-700 transition-colors"
+                  >
+                    Approve
+                  </button>
+                  <button 
+                    onClick={() => updateUserStatus(pendingUser.uid, 'rejected')}
+                    className="flex-1 bg-stone-100 text-stone-600 py-2 rounded-xl text-[10px] font-bold hover:bg-stone-200 transition-colors"
+                  >
+                    Reject
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {activeSubTab === 'zones' && (
         <div className="space-y-6">
@@ -232,12 +318,12 @@ export function TeamManagement({ users, zones }: TeamManagementProps) {
               <tr>
                 <th className="px-6 py-4 text-left text-[10px] font-bold text-stone-400 uppercase tracking-widest">Team Member</th>
                 <th className="px-6 py-4 text-left text-[10px] font-bold text-stone-400 uppercase tracking-widest">Regional Assignment</th>
-                <th className="px-6 py-4 text-left text-[10px] font-bold text-stone-400 uppercase tracking-widest">Role</th>
+                <th className="px-6 py-4 text-left text-[10px] font-bold text-stone-400 uppercase tracking-widest">Status / Role</th>
                 <th className="px-6 py-4 text-right text-[10px] font-bold text-stone-400 uppercase tracking-widest">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-stone-100">
-              {users.map(user => (
+              {users.filter(u => u.status !== 'pending').sort((a, b) => a.name.localeCompare(b.name)).map(user => (
                 <tr key={user.uid} className="hover:bg-stone-50/50 transition-colors">
                   <td className="px-6 py-4">
                     <div className="flex items-center gap-3">
@@ -246,7 +332,32 @@ export function TeamManagement({ users, zones }: TeamManagementProps) {
                       </div>
                       <div>
                         <p className="text-sm font-bold text-stone-900">{user.name}</p>
-                        <p className="text-xs text-stone-400">{user.email}</p>
+                        {editingEmailId === user.uid ? (
+                          <div className="flex items-center gap-1 mt-1">
+                            <input 
+                              type="email"
+                              className="text-xs p-1 border rounded bg-white w-48"
+                              value={editEmailValue}
+                              onChange={e => setEditEmailValue(e.target.value)}
+                              autoFocus
+                            />
+                            <button onClick={() => handleUpdateEmail(user.uid)} className="p-1 text-emerald-600 hover:bg-emerald-50 rounded"><Check className="w-3 h-3" /></button>
+                            <button onClick={() => setEditingEmailId(null)} className="p-1 text-rose-600 hover:bg-rose-50 rounded"><X className="w-3 h-3" /></button>
+                          </div>
+                        ) : (
+                          <div className="flex items-center gap-2 group">
+                            <p className="text-xs text-stone-400">{user.email}</p>
+                            <button 
+                              onClick={() => {
+                                setEditingEmailId(user.uid);
+                                setEditEmailValue(user.email);
+                              }}
+                              className="opacity-0 group-hover:opacity-100 p-1 text-stone-400 hover:text-stone-900 transition-all"
+                            >
+                              <Edit2 className="w-3 h-3" />
+                            </button>
+                          </div>
+                        )}
                       </div>
                     </div>
                   </td>
@@ -263,17 +374,34 @@ export function TeamManagement({ users, zones }: TeamManagementProps) {
                     </select>
                   </td>
                   <td className="px-6 py-4">
-                    <span className={`px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider ${user.role === 'admin' ? 'bg-rose-50 text-rose-600 border border-rose-100' : 'bg-emerald-50 text-emerald-600 border border-emerald-100'}`}>
-                      {user.role}
-                    </span>
+                    <div className="flex items-center gap-2">
+                       <span className={`px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider ${
+                        user.status === 'approved' ? 'bg-blue-50 text-blue-600 border border-blue-100' : 
+                        'bg-rose-50 text-rose-600 border border-rose-100'
+                      }`}>
+                        {user.status}
+                      </span>
+                      <span className={`px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider ${user.role === 'admin' ? 'bg-stone-900 text-white' : 'bg-stone-100 text-stone-600'}`}>
+                        {user.role}
+                      </span>
+                    </div>
                   </td>
                   <td className="px-6 py-4 text-right">
-                    <button 
-                      onClick={() => toggleRole(user.uid, user.role)}
-                      className="text-[10px] font-bold text-stone-400 hover:text-stone-900 uppercase tracking-widest"
-                    >
-                      Promote/Demote
-                    </button>
+                    <div className="flex items-center justify-end gap-4">
+                      <button 
+                        onClick={() => toggleRole(user.uid, user.role)}
+                        className="text-[10px] font-bold text-stone-400 hover:text-stone-900 uppercase tracking-widest transition-colors"
+                      >
+                        {user.role === 'admin' ? 'Demote' : 'Promote'}
+                      </button>
+                      <button 
+                        onClick={() => deleteUser(user.uid)}
+                        className="p-2 text-stone-300 hover:text-rose-600 transition-colors"
+                        title="Delete User"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}

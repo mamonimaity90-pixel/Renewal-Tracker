@@ -5,6 +5,7 @@ export interface User {
   name: string;
   email: string;
   role: UserRole;
+  status: 'pending' | 'approved' | 'rejected';
   zoneId?: string;
 }
 

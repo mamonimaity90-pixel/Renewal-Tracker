@@ -9,9 +9,10 @@
         "name": { "type": "string" },
         "email": { "type": "string", "format": "email" },
         "role": { "type": "string", "enum": ["admin", "team"] },
-        "zoneId": { "type": "string", "description": "ID of the zone this user belongs to" }
+        "zoneId": { "type": "string", "description": "ID of the zone this user belongs to" },
+        "status": { "type": "string", "enum": ["pending", "approved", "rejected"], "default": "pending" }
       },
-      "required": ["uid", "name", "email", "role"]
+      "required": ["uid", "name", "email", "role", "status"]
     },
     "Zone": {
       "title": "Zone",

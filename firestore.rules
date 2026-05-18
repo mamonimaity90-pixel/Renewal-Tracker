@@ -6,32 +6,43 @@ service cloud.firestore {
       return request.auth != null;
     }
 
-    // Role check - simplified for now to avoid get/exists potential issues
+    // Role check
     function isAdmin() {
       return isSignedIn() && (
-        request.auth.token.email == "mamoni.maity90@gmail.com"
+        request.auth.token.email == "mamoni.maity90@gmail.com" ||
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == "admin"
+      );
+    }
+
+    // Approval check
+    function isApproved() {
+      return isSignedIn() && (
+        request.auth.token.email == "mamoni.maity90@gmail.com" ||
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.status == "approved"
       );
     }
 
     // Collection Rules
     match /users/{userId} {
-      allow read, write: if isSignedIn();
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && request.auth.uid == userId;
+      allow update, delete: if isAdmin();
     }
 
     match /hospitals/{hospitalId} {
-      allow read, write: if isSignedIn();
+      allow read, write: if isApproved();
     }
 
     match /interactions/{interactionId} {
-      allow read, write: if isSignedIn();
+      allow read, write: if isApproved();
     }
 
     match /applications/{applicationId} {
-      allow read, write: if isSignedIn();
+      allow read, write: if isApproved();
     }
 
     match /report_schedules/{scheduleId} {
-      allow read, write: if isSignedIn();
+      allow read, write: if isApproved();
     }
 
     match /settings/{settingId} {
@@ -39,7 +50,7 @@ service cloud.firestore {
     }
 
     match /zones/{zoneId} {
-      allow read: if isSignedIn();
+      allow read: if isApproved();
       allow write: if isAdmin();
     }
 

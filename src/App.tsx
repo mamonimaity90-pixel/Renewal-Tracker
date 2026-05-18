@@ -20,7 +20,7 @@ import { ActivityLog } from './components/ActivityLog';
 import { VerificationQueue } from './components/VerificationQueue';
 import { ReportScheduler } from './components/ReportScheduler';
 import { SettingsManager } from './components/SettingsManager';
-import { LogIn, LogOut, Loader2, Mail, Lock, User as UserIcon, AlertCircle } from 'lucide-react';
+import { LogIn, LogOut, Loader2, Mail, Lock, User as UserIcon, AlertCircle, Clock, Ban } from 'lucide-react';
 
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
@@ -53,6 +53,7 @@ export default function App() {
               name: firebaseUser.displayName || 'New User',
               email: firebaseUser.email || '',
               role: firebaseUser.email === 'mamoni.maity90@gmail.com' ? 'admin' : 'team',
+              status: firebaseUser.email === 'mamoni.maity90@gmail.com' ? 'approved' : 'pending',
             };
             try {
               await setDoc(doc(db, 'users', firebaseUser.uid), newUser);
@@ -200,6 +201,7 @@ export default function App() {
           name: name || email.split('@')[0],
           email: email,
           role: email === 'mamoni.maity90@gmail.com' ? 'admin' : 'team',
+          status: email === 'mamoni.maity90@gmail.com' ? 'approved' : 'pending',
         };
         await setDoc(doc(db, 'users', firebaseUser.uid), newUser);
         setUser(newUser);
@@ -364,6 +366,55 @@ export default function App() {
               </div>
             </form>
           )}
+        </div>
+      </div>
+    );
+  }
+
+  if (user.status === 'pending') {
+    return (
+      <div className="min-h-screen bg-stone-50 flex items-center justify-center p-4">
+        <div className="bg-white p-8 rounded-3xl shadow-sm border border-stone-200 max-w-md w-full text-center">
+          <div className="w-16 h-16 bg-blue-50 rounded-full flex items-center justify-center mx-auto mb-6">
+            <Clock className="w-8 h-8 text-blue-600" />
+          </div>
+          <h1 className="text-2xl font-serif font-bold text-stone-900 mb-4">Approval Pending</h1>
+          <p className="text-stone-600 mb-6 leading-relaxed">
+            Your registration request has been submitted. An administrator will review your account and grant access shortly.
+          </p>
+          <div className="bg-stone-50 p-4 rounded-xl text-sm text-stone-500 mb-6">
+            We've notified the team. You'll be able to access the dashboard once approved.
+          </div>
+          <button 
+            onClick={handleLogout}
+            className="w-full flex items-center justify-center gap-2 text-stone-500 hover:text-stone-900 transition-colors font-medium"
+          >
+            <LogOut className="w-5 h-5" />
+            Sign Out
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (user.status === 'rejected') {
+    return (
+      <div className="min-h-screen bg-stone-50 flex items-center justify-center p-4">
+        <div className="bg-white p-8 rounded-3xl shadow-sm border border-stone-200 max-w-md w-full text-center">
+          <div className="w-16 h-16 bg-red-50 rounded-full flex items-center justify-center mx-auto mb-6">
+            <Ban className="w-8 h-8 text-red-600" />
+          </div>
+          <h1 className="text-2xl font-serif font-bold text-stone-900 mb-4">Access Denied</h1>
+          <p className="text-stone-600 mb-6 leading-relaxed">
+            Unfortunately, your access request has been rejected. If you believe this is a mistake, please contact the administrator.
+          </p>
+          <button 
+            onClick={handleLogout}
+            className="w-full flex items-center justify-center gap-2 text-stone-500 hover:text-stone-900 transition-colors font-medium"
+          >
+            <LogOut className="w-5 h-5" />
+            Back to Sign In
+          </button>
         </div>
       </div>
     );
