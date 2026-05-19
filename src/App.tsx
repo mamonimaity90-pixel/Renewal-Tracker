@@ -40,11 +40,17 @@ export default function App() {
   const [quotaExceeded, setQuotaExceeded] = useState(false);
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+    let unsubUserDoc: (() => void) | null = null;
+    
+    const unsubscribeAuth = onAuthStateChanged(auth, async (firebaseUser) => {
+      if (unsubUserDoc) {
+        unsubUserDoc();
+        unsubUserDoc = null;
+      }
+
       if (firebaseUser) {
         const userPath = `users/${firebaseUser.uid}`;
-        try {
-          const userDoc = await getDoc(doc(db, 'users', firebaseUser.uid));
+        unsubUserDoc = onSnapshot(doc(db, 'users', firebaseUser.uid), async (userDoc) => {
           if (userDoc.exists()) {
             const data = userDoc.data();
             // Data migration: Ensure status and role exist for legacy users
@@ -54,8 +60,14 @@ export default function App() {
                 role: data.role || (firebaseUser.email === 'mamoni.maity90@gmail.com' ? 'admin' : 'team'),
                 status: data.status || (firebaseUser.email === 'mamoni.maity90@gmail.com' ? 'approved' : 'pending'),
               };
-              await setDoc(doc(db, 'users', firebaseUser.uid), updatedUser, { merge: true });
-              setUser({ uid: firebaseUser.uid, ...updatedUser } as User);
+              try {
+                // This might trigger another snapshot, but it's a merge write
+                await setDoc(doc(db, 'users', firebaseUser.uid), updatedUser, { merge: true });
+                setUser({ uid: firebaseUser.uid, ...updatedUser } as User);
+              } catch (migrationError) {
+                console.error('Migration failed:', migrationError);
+                setUser({ uid: firebaseUser.uid, ...data } as User);
+              }
             } else {
               setUser({ uid: firebaseUser.uid, ...data } as User);
             }
@@ -74,20 +86,26 @@ export default function App() {
               handleFirestoreError(err, OperationType.WRITE, userPath);
             }
           }
-        } catch (error: any) {
+          setLoading(false);
+        }, (error: any) => {
           if (error.message?.includes('Quota limit exceeded') || error.code === 'resource-exhausted') {
             setQuotaExceeded(true);
+          } else if (error.code !== 'permission-denied') {
+            setAuthError(`Welcome back, but we couldn't load your profile: ${error.message}`);
           }
-          console.error('Error fetching user data:', error);
-          // If we can't even get the user doc because of quota, we are stuck
-        }
+          console.error('Error fetching user data snapshot:', error);
+          setLoading(false);
+        });
       } else {
         setUser(null);
+        setLoading(false);
       }
-      setLoading(false);
     });
 
-    return () => unsubscribe();
+    return () => {
+      unsubscribeAuth();
+      if (unsubUserDoc) unsubUserDoc();
+    };
   }, []);
 
   useEffect(() => {

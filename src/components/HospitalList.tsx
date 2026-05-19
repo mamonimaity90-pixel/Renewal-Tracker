@@ -751,13 +751,16 @@ export const HospitalList = memo(function HospitalList({ hospitals, users, inter
             <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
               <button 
                 onClick={() => {
-                  setSearchTerm('');
-                  setFilterStatus('all');
-                  setFilterProgram('all');
+                  setSearch('');
+                  setFilterRenewal('all');
+                  setFilterConnection('all');
+                  setFilterBatch('all');
                   setFilterUsers([]);
                   setFilterStates([]);
-                  setFilterMonths([]);
-                  setReappliedFilter('all');
+                  setFilterDateStart('');
+                  setFilterDateEnd('');
+                  setFilterFollowUp('all');
+                  setFilterEffortLed(false);
                 }}
                 className="px-6 py-3 bg-stone-900 text-white rounded-2xl font-bold text-sm hover:bg-stone-800 transition-all shadow-lg shadow-stone-200"
               >
