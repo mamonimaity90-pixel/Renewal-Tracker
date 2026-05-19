@@ -1,7 +1,7 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Hospital, Interaction, Zone, User, PerformanceStats } from '../types';
-import { parseISO, isBefore, isAfter, subMonths, startOfYear, endOfYear, format } from 'date-fns';
-import { Trophy, Target, AlertTriangle, TrendingUp, Users } from 'lucide-react';
+import { parseISO, isBefore, isAfter, subMonths, startOfYear, endOfYear, format, startOfMonth, endOfMonth, isWithinInterval } from 'date-fns';
+import { Trophy, Target, AlertTriangle, TrendingUp, Users, Calendar, ChevronDown, Filter } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, PieChart, Pie } from 'recharts';
 
 interface PerformanceDashboardProps {
@@ -12,6 +12,19 @@ interface PerformanceDashboardProps {
 }
 
 export function PerformanceDashboard({ hospitals, interactions, zones, users }: PerformanceDashboardProps) {
+  const [dateRange, setDateRange] = useState<{ start: Date; end: Date; label: string }>({
+    start: startOfMonth(new Date()),
+    end: endOfMonth(new Date()),
+    label: 'This Month'
+  });
+
+  const quickRanges = [
+    { label: 'This Month', start: startOfMonth(new Date()), end: endOfMonth(new Date()) },
+    { label: 'Last Month', start: startOfMonth(subMonths(new Date(), 1)), end: endOfMonth(subMonths(new Date(), 1)) },
+    { label: 'This Year', start: startOfYear(new Date()), end: endOfYear(new Date()) },
+    { label: 'All Time', start: new Date(2020, 0, 1), end: new Date(2030, 0, 1) },
+  ];
+
   const performanceStats = useMemo(() => {
     const statsMap = new Map<string, PerformanceStats>();
     
@@ -32,11 +45,20 @@ export function PerformanceDashboard({ hospitals, interactions, zones, users }: 
 
       const stats = statsMap.get(hospitalZone.id)!;
       const expiryDate = parseISO(h.expiryDate);
-      const now = new Date();
+      
+      const isInRange = (dateStr?: string) => {
+        if (!dateStr) return false;
+        try {
+          const date = parseISO(dateStr);
+          return isWithinInterval(date, { start: dateRange.start, end: dateRange.end });
+        } catch {
+          return false;
+        }
+      };
 
       // Rule 1: Early Renewal (+3 points)
-      // Hospital applies 3 months prior to its expiry
-      if (h.reapplied && h.renewalApplicationDate) {
+      // Check if the renewal application happened WITHIN the selected range
+      if (h.reapplied && h.renewalApplicationDate && isInRange(h.renewalApplicationDate)) {
         const renewalDate = parseISO(h.renewalApplicationDate);
         const threeMonthsPrior = subMonths(expiryDate, 3);
         if (isBefore(renewalDate, threeMonthsPrior)) {
@@ -46,8 +68,8 @@ export function PerformanceDashboard({ hospitals, interactions, zones, users }: 
       }
 
       // Rule 2: Vintage Recovery (+10 points)
-      // Bring back a hospital from 2023-2025
-      if (h.reapplied) {
+      // Check if the recovery application happened WITHIN the selected range
+      if (h.reapplied && h.renewalApplicationDate && isInRange(h.renewalApplicationDate)) {
         const year = expiryDate.getFullYear();
         if (year >= 2023 && year <= 2025) {
           stats.points += 10;
@@ -56,15 +78,62 @@ export function PerformanceDashboard({ hospitals, interactions, zones, users }: 
       }
 
       // Rule 3: Fail to bring back (-1 point)
-      // We fail to bring back hospitals (Expired without reapplying)
-      if (!h.reapplied && isBefore(expiryDate, now)) {
-        stats.points -= 1;
-        stats.expirations += 1;
+      // Check if the EXPIRY happened WITHIN the selected range
+      if (!h.reapplied && isInRange(h.expiryDate)) {
+        const now = new Date();
+        if (isBefore(expiryDate, now)) {
+          stats.points -= 1;
+          stats.expirations += 1;
+        }
       }
     });
 
     return Array.from(statsMap.values()).sort((a: PerformanceStats, b: PerformanceStats) => b.points - a.points);
-  }, [hospitals, zones]);
+  }, [hospitals, zones, dateRange]);
+
+  const teamStats = useMemo(() => {
+    const statsMap = new Map<string, { userId: string; name: string; interactions: number; conversions: number; points: number }>();
+    
+    users.forEach(u => {
+      statsMap.set(u.uid, { userId: u.uid, name: u.name, interactions: 0, conversions: 0, points: 0 });
+    });
+
+    const isInRange = (dateStr?: string) => {
+      if (!dateStr) return false;
+      try {
+        const date = parseISO(dateStr);
+        return isWithinInterval(date, { start: dateRange.start, end: dateRange.end });
+      } catch {
+        return false;
+      }
+    };
+
+    // Count interactions in range
+    interactions.forEach(i => {
+      if (isInRange(i.timestamp)) {
+        const stats = statsMap.get(i.userId);
+        if (stats) {
+          stats.interactions += 1;
+          stats.points += 1; // 1 point per interaction
+        }
+      }
+    });
+
+    // Count renewals (effort-led) in range
+    hospitals.forEach(h => {
+      if (h.reapplied && h.renewalApplicationDate && isInRange(h.renewalApplicationDate) && h.assignedTo) {
+        const stats = statsMap.get(h.assignedTo);
+        if (stats) {
+          stats.conversions += 1;
+          stats.points += 5; // 5 points per renewal
+        }
+      }
+    });
+
+    return Array.from(statsMap.values())
+      .filter(s => s.interactions > 0 || s.conversions > 0)
+      .sort((a, b) => b.points - a.points);
+  }, [users, interactions, hospitals, dateRange]);
 
   const chartData = useMemo(() => {
     return performanceStats.map(stat => ({
@@ -78,9 +147,36 @@ export function PerformanceDashboard({ hospitals, interactions, zones, users }: 
 
   return (
     <div className="space-y-8 pb-20">
-      <header>
-        <h2 className="text-3xl font-serif font-bold text-stone-900">Team Performance</h2>
-        <p className="text-stone-500">Regional zone performance based on retention targets.</p>
+      <header className="flex flex-col md:flex-row md:items-end justify-between gap-6">
+        <div>
+          <h2 className="text-3xl font-serif font-bold text-stone-900">Team Performance</h2>
+          <p className="text-stone-500">Regional zone performance based on retention targets.</p>
+        </div>
+        
+        <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 bg-white p-2 rounded-3xl border border-stone-200 shadow-sm">
+          <div className="flex items-center gap-2 px-3 py-2 text-stone-400 whitespace-nowrap">
+            <Filter className="w-4 h-4" />
+            <span className="text-[10px] font-bold uppercase tracking-widest">Competition Period</span>
+          </div>
+          <div className="flex bg-stone-50 p-1 rounded-2xl w-full sm:w-auto">
+            {quickRanges.map(range => (
+              <button
+                key={range.label}
+                onClick={() => setDateRange({ ...range })}
+                className={`px-3 py-1.5 rounded-xl text-[10px] font-bold transition-all whitespace-nowrap ${dateRange.label === range.label ? 'bg-white shadow-sm text-stone-900' : 'text-stone-400 hover:text-stone-600'}`}
+              >
+                {range.label}
+              </button>
+            ))}
+          </div>
+          <div className="hidden sm:block w-px h-6 bg-stone-100 mx-1" />
+          <div className="flex items-center gap-2 px-4 py-2 bg-stone-900 text-white rounded-2xl cursor-default">
+            <Calendar className="w-3.5 h-3.5" />
+            <span className="text-[10px] font-bold">
+              {format(dateRange.start, 'MMM d')} - {format(dateRange.end, 'MMM d, yyyy')}
+            </span>
+          </div>
+        </div>
       </header>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
@@ -202,6 +298,44 @@ export function PerformanceDashboard({ hospitals, interactions, zones, users }: 
                 </div>
               );
             })}
+          </div>
+        </div>
+
+        <div className="bg-white p-8 rounded-3xl border border-stone-200 shadow-sm lg:col-span-2">
+          <div className="flex items-center justify-between mb-6">
+            <h3 className="text-lg font-bold text-stone-900">Individual Team Competition</h3>
+            <span className="px-2 py-1 bg-amber-50 text-amber-600 text-[10px] font-bold rounded-lg uppercase">Range Stats</span>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {teamStats.map((u, idx) => (
+              <div key={u.userId} className="p-5 bg-stone-50 rounded-3xl border border-stone-100 flex flex-col gap-3 relative overflow-hidden">
+                {idx === 0 && <div className="absolute top-0 right-0 p-2"><Trophy className="w-4 h-4 text-amber-500" /></div>}
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-2xl bg-white shadow-sm flex items-center justify-center text-xs font-bold text-stone-600">
+                    {idx + 1}
+                  </div>
+                  <div>
+                    <h4 className="text-sm font-bold text-stone-900">{u.name}</h4>
+                    <p className="text-[10px] text-stone-400 font-bold uppercase tracking-wider">{u.points} Points Earned</p>
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-2 mt-2">
+                  <div className="bg-white p-2 rounded-xl border border-stone-100">
+                    <p className="text-[8px] font-bold text-stone-400 uppercase">Calls</p>
+                    <p className="text-xs font-bold text-stone-900">{u.interactions}</p>
+                  </div>
+                  <div className="bg-white p-2 rounded-xl border border-stone-100">
+                    <p className="text-[8px] font-bold text-stone-400 uppercase">Renewals</p>
+                    <p className="text-xs font-bold text-emerald-600">{u.conversions}</p>
+                  </div>
+                </div>
+              </div>
+            ))}
+            {teamStats.length === 0 && (
+              <div className="col-span-full py-10 text-center text-stone-400 italic text-sm">
+                No individual activity recorded in this period.
+              </div>
+            )}
           </div>
         </div>
       </div>

@@ -20,7 +20,7 @@ import { ActivityLog } from './components/ActivityLog';
 import { VerificationQueue } from './components/VerificationQueue';
 import { ReportScheduler } from './components/ReportScheduler';
 import { SettingsManager } from './components/SettingsManager';
-import { LogIn, LogOut, Loader2, Mail, Lock, User as UserIcon, AlertCircle, Clock, Ban } from 'lucide-react';
+import { LogIn, LogOut, Loader2, Mail, Lock, User as UserIcon, AlertCircle, Clock, Ban, AlertTriangle, RotateCw } from 'lucide-react';
 
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
@@ -46,7 +46,19 @@ export default function App() {
         try {
           const userDoc = await getDoc(doc(db, 'users', firebaseUser.uid));
           if (userDoc.exists()) {
-            setUser({ uid: firebaseUser.uid, ...userDoc.data() } as User);
+            const data = userDoc.data();
+            // Data migration: Ensure status and role exist for legacy users
+            if (!data.status || !data.role) {
+              const updatedUser = {
+                ...data,
+                role: data.role || (firebaseUser.email === 'mamoni.maity90@gmail.com' ? 'admin' : 'team'),
+                status: data.status || (firebaseUser.email === 'mamoni.maity90@gmail.com' ? 'approved' : 'pending'),
+              };
+              await setDoc(doc(db, 'users', firebaseUser.uid), updatedUser, { merge: true });
+              setUser({ uid: firebaseUser.uid, ...updatedUser } as User);
+            } else {
+              setUser({ uid: firebaseUser.uid, ...data } as User);
+            }
           } else {
             const newUser: User = {
               uid: firebaseUser.uid,
@@ -66,7 +78,8 @@ export default function App() {
           if (error.message?.includes('Quota limit exceeded') || error.code === 'resource-exhausted') {
             setQuotaExceeded(true);
           }
-          handleFirestoreError(error, OperationType.GET, userPath);
+          console.error('Error fetching user data:', error);
+          // If we can't even get the user doc because of quota, we are stuck
         }
       } else {
         setUser(null);
@@ -231,25 +244,25 @@ export default function App() {
       <div className="min-h-screen bg-stone-50 flex items-center justify-center p-4">
         <div className="bg-white p-8 rounded-3xl shadow-sm border border-stone-100 max-w-md w-full text-center">
           <div className="w-16 h-16 bg-amber-50 rounded-full flex items-center justify-center mx-auto mb-6">
-            <AlertCircle className="w-8 h-8 text-amber-600" />
+            <AlertTriangle className="w-8 h-8 text-amber-600" />
           </div>
           <h1 className="text-2xl font-serif font-bold text-stone-900 mb-4">Daily Limit Reached</h1>
           <p className="text-stone-600 mb-6 leading-relaxed">
-            The application has reached its daily limit for data reads. This is a restriction of the free tier and will automatically reset tomorrow.
+            The application has reached its daily limit for data reads. This is a restriction of the free tier and will automatically reset at midnight Pacific Time.
           </p>
           <div className="bg-stone-50 p-4 rounded-xl text-left mb-6">
             <p className="text-xs font-bold text-stone-400 uppercase mb-2">What you can do:</p>
             <ul className="text-sm text-stone-600 space-y-2 list-disc pl-4">
-              <li>Wait for the daily reset (midnight US Pacific Time)</li>
-              <li>Check back tomorrow to continue your work</li>
+              <li>Wait for the daily reset</li>
+              <li>Ask the admin to enable billing for higher limits</li>
               <li>Avoid frequent refreshes once it resets</li>
             </ul>
           </div>
           <button 
             onClick={() => window.location.reload()}
-            className="w-full bg-stone-900 text-white py-3 px-6 rounded-xl hover:bg-stone-800 transition-colors font-medium"
+            className="w-full bg-stone-900 text-white py-3 px-6 rounded-xl hover:bg-stone-800 transition-colors font-medium flex items-center justify-center gap-2"
           >
-            Try Refreshing
+            <RotateCw className="w-4 h-4" /> Try Refreshing
           </button>
         </div>
       </div>

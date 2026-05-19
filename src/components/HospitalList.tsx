@@ -740,8 +740,42 @@ export const HospitalList = memo(function HospitalList({ hospitals, users, inter
           </table>
         </div>
         {paginatedHospitals.length === 0 && (
-          <div className="p-20 text-center">
-            <p className="text-stone-400 italic">No hospitals found matching your criteria.</p>
+          <div className="p-20 text-center bg-white rounded-b-[40px] border-t border-stone-100">
+            <div className="w-16 h-16 bg-stone-50 rounded-full flex items-center justify-center mx-auto mb-6 text-stone-300">
+              <Search className="w-8 h-8" />
+            </div>
+            <h3 className="text-xl font-serif font-bold text-stone-900 mb-2">No results found</h3>
+            <p className="text-stone-400 mb-8 max-w-xs mx-auto text-sm">
+              We couldn't find any hospitals matching your current filters or search query.
+            </p>
+            <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
+              <button 
+                onClick={() => {
+                  setSearchTerm('');
+                  setFilterStatus('all');
+                  setFilterProgram('all');
+                  setFilterUsers([]);
+                  setFilterStates([]);
+                  setFilterMonths([]);
+                  setReappliedFilter('all');
+                }}
+                className="px-6 py-3 bg-stone-900 text-white rounded-2xl font-bold text-sm hover:bg-stone-800 transition-all shadow-lg shadow-stone-200"
+              >
+                Clear all filters
+              </button>
+              <button 
+                onClick={() => window.location.reload()}
+                className="px-6 py-3 bg-stone-50 text-stone-600 rounded-2xl font-bold text-sm hover:bg-stone-100 transition-all"
+              >
+                Refresh page
+              </button>
+            </div>
+            <div className="mt-12 pt-12 border-t border-stone-50">
+              <p className="text-[10px] font-bold text-stone-400 uppercase tracking-widest mb-4">Troubleshooting</p>
+              <p className="text-xs text-stone-400 max-w-sm mx-auto leading-relaxed">
+                If you believe you should see data here, please ensure your internet connection is stable and that you have been approved by the admin.
+              </p>
+            </div>
           </div>
         )}
       </div>
@@ -993,16 +1027,31 @@ function LogInteractionModal({ hospital, interactions, users, isAdmin, onClose }
       
       await addDoc(collection(db, 'interactions'), dataToSave);
 
-      // Update hospital's next follow up date
-      if (formData.followUpDate) {
+      // Update hospital's next follow up date safely
+      if (formData.followUpDate && formData.followUpDate.trim() !== '') {
+        try {
+          const followUpDate = new Date(formData.followUpDate);
+          if (!isNaN(followUpDate.getTime())) {
+            await updateDoc(doc(db, 'hospitals', hospital.id), {
+              nextFollowUpDate: followUpDate.toISOString(),
+              lastInteractionDate: new Date().toISOString()
+            });
+          }
+        } catch (dateError) {
+          console.error('Failed to update hospital follow-up date:', dateError);
+        }
+      } else {
+        // Just update last interaction date if no follow-up date
         await updateDoc(doc(db, 'hospitals', hospital.id), {
-          nextFollowUpDate: new Date(formData.followUpDate).toISOString()
+          lastInteractionDate: new Date().toISOString()
         });
       }
 
+      alert(`Interaction for ${hospital.name} logged successfully.`);
       onClose();
-    } catch (error) {
+    } catch (error: any) {
       console.error('Failed to log interaction:', error);
+      alert(`Error saving interaction: ${error.message || 'Unknown error'}. This might be due to a daily quota limit or insufficient permissions.`);
     } finally {
       setLoading(false);
     }
