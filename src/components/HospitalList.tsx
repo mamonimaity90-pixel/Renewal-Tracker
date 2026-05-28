@@ -39,6 +39,22 @@ interface HospitalListProps {
 
 const ITEMS_PER_PAGE = 50;
 
+const INTERACTION_REASONS = [
+  'Certification to Accreditation',
+  'Already applied for renewal',
+  'Applied elsewhere',
+  'Concerned person not available',
+  'Does not see benefit',
+  'Hospital shut down',
+  'Need assistance',
+  'Not interested',
+  'Not Prepared',
+  'SPOC change',
+  'Will apply soon',
+  'Yet to decide',
+  'Others'
+];
+
 export const HospitalList = memo(function HospitalList({ hospitals, users, interactions, isAdmin }: HospitalListProps) {
   const [search, setSearch] = useState('');
   const [sortField, setSortField] = useState<keyof Hospital | 'lastAttemptedDate'>('expiryDate');
@@ -61,6 +77,7 @@ export const HospitalList = memo(function HospitalList({ hospitals, users, inter
   const [filterDateStart, setFilterDateStart] = useState('');
   const [filterDateEnd, setFilterDateEnd] = useState('');
   const [filterFollowUp, setFilterFollowUp] = useState<'all' | 'today' | 'overdue' | 'upcoming'>('all');
+  const [filterReason, setFilterReason] = useState<string>('all');
   const [activeHospitalId, setActiveHospitalId] = useState<string | null>(null);
 
   const availableStates = useMemo(() => Array.from(new Set(hospitals.map(h => h.state))).sort(), [hospitals]);
@@ -105,6 +122,7 @@ export const HospitalList = memo(function HospitalList({ hospitals, users, inter
   const filteredHospitals = useMemo(() => {
     return hospitals
       .filter(h => {
+        const latestInteraction = latestInteractionsMap.get(h.id);
         const matchesSearch = 
           h.name.toLowerCase().includes(search.toLowerCase()) ||
           h.state.toLowerCase().includes(search.toLowerCase()) ||
@@ -130,7 +148,6 @@ export const HospitalList = memo(function HospitalList({ hospitals, users, inter
         let matchesConnection = true;
         if (filterConnection !== 'all') {
           const hospitalInteractions = hospitalInteractionsMap.get(h.id) || [];
-          const latestInteraction = latestInteractionsMap.get(h.id);
 
           if (filterConnection === 'none') {
             matchesConnection = hospitalInteractions.length === 0;
@@ -142,6 +159,11 @@ export const HospitalList = memo(function HospitalList({ hospitals, users, inter
           } else if (filterConnection === 'not-connected') {
             matchesConnection = latestInteraction?.result === 'Not Connected';
           }
+        }
+
+        let matchesReason = true;
+        if (filterReason !== 'all') {
+          matchesReason = latestInteraction?.reason === filterReason;
         }
         
         let matchesDate = true;
@@ -168,7 +190,7 @@ export const HospitalList = memo(function HospitalList({ hospitals, users, inter
           matchesFollowUp = false;
         }
 
-        return matchesSearch && matchesUser && matchesState && matchesBatch && matchesRenewal && matchesConnection && matchesDate && matchesEffort && matchesFollowUp;
+        return matchesSearch && matchesUser && matchesState && matchesBatch && matchesRenewal && matchesConnection && matchesReason && matchesDate && matchesEffort && matchesFollowUp;
       })
       .map(h => {
         const lastAtt = latestInteractionsMap.get(h.id);
@@ -192,7 +214,7 @@ export const HospitalList = memo(function HospitalList({ hospitals, users, inter
         if (valA > valB) return sortOrder === 'asc' ? 1 : -1;
         return 0;
       });
-  }, [hospitals, hospitalInteractionsMap, latestInteractionsMap, search, filterUsers, filterStates, filterRenewal, filterConnection, filterBatch, filterDateStart, filterDateEnd, filterEffortLed, filterFollowUp, sortField, sortOrder, effortLedHospitals]);
+  }, [hospitals, hospitalInteractionsMap, latestInteractionsMap, search, filterUsers, filterStates, filterRenewal, filterConnection, filterBatch, filterDateStart, filterDateEnd, filterEffortLed, filterFollowUp, filterReason, sortField, sortOrder, effortLedHospitals]);
 
   const totalPages = Math.ceil(filteredHospitals.length / ITEMS_PER_PAGE);
   const paginatedHospitals = filteredHospitals.slice(
@@ -374,7 +396,7 @@ export const HospitalList = memo(function HospitalList({ hospitals, users, inter
             />
           </div>
           <div className="flex items-center gap-4">
-            {(search || filterUsers.length > 0 || filterStates.length > 0 || filterRenewal !== 'all' || filterConnection !== 'all' || filterDateStart || filterDateEnd) && (
+            {(search || filterUsers.length > 0 || filterStates.length > 0 || filterRenewal !== 'all' || filterConnection !== 'all' || filterReason !== 'all' || filterDateStart || filterDateEnd) && (
               <button 
                 onClick={() => {
                   setSearch('');
@@ -382,6 +404,7 @@ export const HospitalList = memo(function HospitalList({ hospitals, users, inter
                   setFilterStates([]);
                   setFilterRenewal('all');
                   setFilterConnection('all');
+                  setFilterReason('all');
                   setFilterEffortLed(false);
                   setFilterFollowUp('all');
                   setFilterDateStart('');
@@ -474,6 +497,22 @@ export const HospitalList = memo(function HospitalList({ hospitals, users, inter
               <option value="today">Today</option>
               <option value="overdue">Overdue</option>
               <option value="upcoming">Upcoming</option>
+            </select>
+          </div>
+          <div>
+            <label className="block text-[10px] font-bold text-stone-400 uppercase mb-1">Latest Reason</label>
+            <select
+              className="w-full p-2 bg-stone-50 border-none rounded-lg text-xs focus:ring-1 focus:ring-stone-200"
+              value={filterReason}
+              onChange={(e) => {
+                setFilterReason(e.target.value);
+                setCurrentPage(1);
+              }}
+            >
+              <option value="all">All Reasons</option>
+              {INTERACTION_REASONS.map(r => (
+                <option key={r} value={r}>{r}</option>
+              ))}
             </select>
           </div>
           <div>
@@ -761,6 +800,7 @@ export const HospitalList = memo(function HospitalList({ hospitals, users, inter
                   setFilterDateEnd('');
                   setFilterFollowUp('all');
                   setFilterEffortLed(false);
+                  setFilterReason('all');
                 }}
                 className="px-6 py-3 bg-stone-900 text-white rounded-2xl font-bold text-sm hover:bg-stone-800 transition-all shadow-lg shadow-stone-200"
               >

@@ -29,14 +29,29 @@ export function BulkUpload({ onClose, users, existingHospitals }: BulkUploadProp
     const trimmed = String(dateStr).trim();
     if (!trimmed) return null;
 
-    // Try common formats with date-fns
+    // We prioritize DD/MM/YYYY and other day-first formats to avoid interpreting day <= 12 as month
     const formats = [
-      'dd-MM-yyyy', 'yyyy-MM-dd', 'MM/dd/yyyy', 'dd/MM/yyyy', 
-      'd/M/yyyy', 'd-M-yyyy', 'dd-MMM-yyyy', 'dd-MMM-yy',
-      'd/M/yy', 'M/d/yy', 'dd.MM.yyyy', 'MMM d, yyyy', 'MMMM d, yyyy',
-      'dd-MM-yy', 'MM-dd-yyyy', 'yyyy/MM/dd', 'dd.MM.yy', 'd.M.yy', 'd.M.yyyy',
-      'dd/MMM/yyyy', 'dd/MMM/yy', 'dd-MMM-yyyy', 'MMM-yy', 'MMM-yyyy',
-      'dd.MMM.yyyy', 'dd.MMM.yy', 'd.MMM.yy', 'd.MMM.yyyy'
+      'dd/MM/yyyy', 'd/M/yyyy', 
+      'dd-MM-yyyy', 'd-M-yyyy', 
+      'dd.MM.yyyy', 'd.M.yyyy',
+      
+      'dd/MM/yy', 'd/M/yy',
+      'dd-MM-yy', 'd-M-yy',
+      'dd.MM.yy', 'd.M.yy',
+
+      'yyyy-MM-dd', 'yyyy/MM/dd',
+
+      'MM/dd/yyyy', 'M/d/yyyy',
+      'MM-dd-yyyy', 'M-d-yyyy',
+      'MM/dd/yy', 'M/d/yy',
+      'MM-dd-yy', 'M-d-yy',
+
+      'dd-MMM-yyyy', 'dd-MMM-yy',
+      'dd/MMM/yyyy', 'dd/MMM/yy', 
+      'dd.MMM.yyyy', 'dd.MMM.yy', 
+      'd.MMM.yy', 'd.MMM.yyyy',
+      'MMM d, yyyy', 'MMMM d, yyyy',
+      'MMM-yy', 'MMM-yyyy'
     ];
     
     for (const f of formats) {
