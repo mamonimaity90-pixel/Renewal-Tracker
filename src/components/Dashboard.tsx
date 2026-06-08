@@ -225,10 +225,11 @@ export const Dashboard = memo(function Dashboard({ hospitals, interactions, appl
         const hInteractions = hospitalInteractionsMap.get(h.id) || [];
         return hInteractions.some(i => {
           if (i.result !== 'Connected') return false;
+          if (i.reason === 'Already applied for renewal' || i.reason === 'Certification to Accreditation' || i.reapplied) return false;
           try {
             const interDate = startOfDay(parseISO(i.timestamp));
             const renewalDate = startOfDay(parseISO(h.renewalApplicationDate!));
-            return isBefore(interDate, renewalDate) || interDate.getTime() === renewalDate.getTime();
+            return isBefore(interDate, renewalDate);
           } catch {
             return false;
           }
@@ -570,10 +571,11 @@ export const Dashboard = memo(function Dashboard({ hospitals, interactions, appl
       const hInteractions = hospitalInteractionsMap.get(h.id) || [];
       const interactionsBeforeRenewal = hInteractions.filter(i => {
         if (i.result !== 'Connected') return false;
+        if (i.reason === 'Already applied for renewal' || i.reason === 'Certification to Accreditation' || i.reapplied) return false;
         try {
           const interDate = startOfDay(parseISO(i.timestamp));
           const renewalDate = startOfDay(parseISO(h.renewalApplicationDate!));
-          return isBefore(interDate, renewalDate) || interDate.getTime() === renewalDate.getTime();
+          return isBefore(interDate, renewalDate);
         } catch {
           return false;
         }

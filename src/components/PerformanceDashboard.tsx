@@ -30,6 +30,7 @@ export function PerformanceDashboard({ hospitals, interactions, zones, users }: 
   interface ExtendedPerformanceStats extends PerformanceStats {
     totalZoneVolume: number;
     activeOpportunitiesCount: number;
+    renewedOpportunitiesCount: number;
     balancedScore: number;
   }
 
@@ -53,6 +54,19 @@ export function PerformanceDashboard({ hospitals, interactions, zones, users }: 
         }
       }).length;
 
+      // 3. Renewed Active Opportunities: Number of expiring hospitals that have renewed in this zone in range
+      const renewedOpportunitiesCount = hospitals.filter(h => {
+        if (!zone.states.includes(h.state)) return false;
+        if (!h.expiryDate) return false;
+        if (!h.reapplied) return false;
+        try {
+          const date = parseISO(h.expiryDate);
+          return isWithinInterval(date, { start: dateRange.start, end: dateRange.end });
+        } catch {
+          return false;
+        }
+      }).length;
+
       statsMap.set(zone.id, {
         zoneId: zone.id,
         points: 0,
@@ -61,6 +75,7 @@ export function PerformanceDashboard({ hospitals, interactions, zones, users }: 
         expirations: 0,
         totalZoneVolume,
         activeOpportunitiesCount,
+        renewedOpportunitiesCount,
         balancedScore: 0
       });
     });
@@ -133,7 +148,7 @@ export function PerformanceDashboard({ hospitals, interactions, zones, users }: 
       const scoreB = balancingStrategy === 'raw' ? b.points : b.balancedScore;
       return scoreB - scoreA;
     });
-  }, [hospitals, zones, dateRange, balancingStrategy]);
+  }, [hospitals, zones, dateRange, balancingStrategy, interactions]);
 
   const teamStats = useMemo(() => {
     const statsMap = new Map<string, { userId: string; name: string; interactions: number; conversions: number; points: number }>();
@@ -177,10 +192,11 @@ export function PerformanceDashboard({ hospitals, interactions, zones, users }: 
         const hInteractions = hospitalInteractionsMap.get(h.id) || [];
         const hasOutreachBeforeOrSameDay = hInteractions.some(i => {
           if (i.result !== 'Connected') return false;
+          if (i.reason === 'Already applied for renewal' || i.reason === 'Certification to Accreditation' || i.reapplied) return false;
           try {
             const interDate = startOfDay(parseISO(i.timestamp));
             const renewalDate = startOfDay(parseISO(h.renewalApplicationDate!));
-            return isBefore(interDate, renewalDate) || interDate.getTime() === renewalDate.getTime();
+            return isBefore(interDate, renewalDate);
           } catch {
             return false;
           }
@@ -360,7 +376,7 @@ export function PerformanceDashboard({ hospitals, interactions, zones, users }: 
             </div>
 
             {/* Index Formulas Information Footer Grid */}
-            <div className="lg:col-span-3 bg-stone-50 border border-stone-200/60 p-6 rounded-2xl grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div className="lg:col-span-3 bg-stone-50 border border-stone-200/60 p-6 rounded-2xl grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6">
               <div>
                 <h5 className="text-xs font-bold text-stone-900 uppercase tracking-widest mb-2 flex items-center gap-1">
                   <Trophy className="w-3.5 h-3.5 text-stone-800" /> Balanced Portfolio Index (BPI)
@@ -382,6 +398,18 @@ export function PerformanceDashboard({ hospitals, interactions, zones, users }: 
                 </p>
                 <div className="bg-stone-100/80 rounded-xl p-3 font-mono text-[10px] text-stone-700 border border-stone-200 text-center">
                   Score = (Raw Points / Period Opportunities) &times; 10
+                </div>
+              </div>
+
+              <div>
+                <h5 className="text-xs font-bold text-stone-900 uppercase tracking-widest mb-2 flex items-center gap-1">
+                  <HelpCircle className="w-3.5 h-3.5 text-stone-800" /> Renewal Efficiency %
+                </h5>
+                <p className="text-stone-500 text-xs leading-relaxed mb-3">
+                  Represents the percentage of active expiring opportunities in this period that high-priority efforts successfully renewed.
+                </p>
+                <div className="bg-stone-100/80 rounded-xl p-3 font-mono text-[10px] text-stone-700 border border-stone-200 text-center">
+                  Rate = (Renewed Opportunities / Period Opportunities) &times; 100
                 </div>
               </div>
 
@@ -538,53 +566,29 @@ export function PerformanceDashboard({ hospitals, interactions, zones, users }: 
                       <p className="text-xs font-bold text-stone-800">{stat.activeOpportunitiesCount} hosp.</p>
                     </div>
                     <div>
-                      <p className="text-[10px] font-bold text-stone-400 uppercase">Efficiency</p>
-                      <p className="text-xs font-extrabold text-stone-950">
-                        {stat.totalZoneVolume > 0 ? `${(( (stat.earlyRenewals + stat.vintageRecoveries) / Math.max(1, stat.totalZoneVolume) ) * 100).toFixed(0)}%` : '0%'}
+                      <p className="text-[10px] font-bold text-stone-400 uppercase">Efficiency % / Renewed</p>
+                      <p className="text-xs font-extrabold text-stone-950 text-emerald-700">
+                        {stat.activeOpportunitiesCount > 0 
+                          ? `${((stat.renewedOpportunitiesCount / stat.activeOpportunitiesCount) * 100).toFixed(0)}% (${stat.renewedOpportunitiesCount} renewed)`
+                          : '0% (0 renewed)'}
                       </p>
                     </div>
+                  </div>
+
+                  {/* Gross points bifurcation equation */}
+                  <div className="mt-3 text-[10px] text-stone-500 font-mono bg-stone-100/80 p-2 rounded-xl border border-stone-200/50 flex flex-wrap gap-x-2 gap-y-0.5 items-center">
+                    <span className="font-bold text-stone-600 uppercase tracking-wider text-[9px]">Bifurcation:</span>
+                    <span>({stat.earlyRenewals} early &times; +3)</span>
+                    <span>+</span>
+                    <span>({stat.vintageRecoveries} vintage &times; +10)</span>
+                    <span>-</span>
+                    <span>({stat.expirations} expired &times; 1)</span>
+                    <span>=</span>
+                    <strong className="text-stone-800 font-bold">{stat.points} Gross Pts</strong>
                   </div>
                 </div>
               );
             })}
-          </div>
-        </div>
-
-        <div className="bg-white p-8 rounded-3xl border border-stone-200 shadow-sm lg:col-span-2">
-          <div className="flex items-center justify-between mb-6">
-            <h3 className="text-lg font-bold text-stone-900">Individual Team Competition</h3>
-            <span className="px-2 py-1 bg-amber-50 text-amber-600 text-[10px] font-bold rounded-lg uppercase">Range Stats</span>
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {teamStats.map((u, idx) => (
-              <div key={u.userId} className="p-5 bg-stone-50 rounded-3xl border border-stone-100 flex flex-col gap-3 relative overflow-hidden">
-                {idx === 0 && <div className="absolute top-0 right-0 p-2"><Trophy className="w-4 h-4 text-amber-500" /></div>}
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-2xl bg-white shadow-sm flex items-center justify-center text-xs font-bold text-stone-600">
-                    {idx + 1}
-                  </div>
-                  <div>
-                    <h4 className="text-sm font-bold text-stone-900">{u.name}</h4>
-                    <p className="text-[10px] text-stone-400 font-bold uppercase tracking-wider">{u.points} Points Earned</p>
-                  </div>
-                </div>
-                <div className="grid grid-cols-2 gap-2 mt-2">
-                  <div className="bg-white p-2 rounded-xl border border-stone-100">
-                    <p className="text-[8px] font-bold text-stone-400 uppercase">Calls</p>
-                    <p className="text-xs font-bold text-stone-900">{u.interactions}</p>
-                  </div>
-                  <div className="bg-white p-2 rounded-xl border border-stone-100">
-                    <p className="text-[8px] font-bold text-stone-400 uppercase">Renewals</p>
-                    <p className="text-xs font-bold text-emerald-600">{u.conversions}</p>
-                  </div>
-                </div>
-              </div>
-            ))}
-            {teamStats.length === 0 && (
-              <div className="col-span-full py-10 text-center text-stone-400 italic text-sm">
-                No individual activity recorded in this period.
-              </div>
-            )}
           </div>
         </div>
       </div>

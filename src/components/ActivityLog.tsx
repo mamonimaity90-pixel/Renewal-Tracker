@@ -349,11 +349,13 @@ export function ActivityLog({ hospitals, interactions, users, currentUser }: Act
                       {hospital?.reapplied && 
                        hospital?.renewalApplicationDate && 
                        log.result === 'Connected' &&
+                       log.reason !== 'Already applied for renewal' &&
+                       log.reason !== 'Certification to Accreditation' &&
                        (() => {
                          try {
                            const interDate = startOfDay(parseISO(log.timestamp));
                            const renewalDate = startOfDay(parseISO(hospital.renewalApplicationDate));
-                           return isBefore(interDate, renewalDate) || interDate.getTime() === renewalDate.getTime();
+                           return isBefore(interDate, renewalDate);
                          } catch {
                            return false;
                          }

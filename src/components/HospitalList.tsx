@@ -112,10 +112,11 @@ export const HospitalList = memo(function HospitalList({ hospitals, users, inter
         // interactions are sorted DESC, so we can't easily break early, but this is still O(M) total
         const hasInteractionBeforeRenewal = hospitalInteractions.some(i => {
           if (i.result !== 'Connected') return false;
+          if (i.reason === 'Already applied for renewal' || i.reason === 'Certification to Accreditation' || i.reapplied) return false;
           try {
             const interDate = startOfDay(parseISO(i.timestamp));
             const renewalDate = startOfDay(parseISO(h.renewalApplicationDate!));
-            return isBefore(interDate, renewalDate) || interDate.getTime() === renewalDate.getTime();
+            return isBefore(interDate, renewalDate);
           } catch {
             return false;
           }
@@ -458,7 +459,7 @@ export const HospitalList = memo(function HospitalList({ hospitals, users, inter
           </div>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-12 gap-4 pt-2 border-t border-stone-100">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 pt-4 border-t border-stone-100">
           <div>
             <label className="block text-[10px] font-bold text-stone-400 uppercase mb-1">Assigned To</label>
             <MultiSelect
@@ -561,7 +562,7 @@ export const HospitalList = memo(function HospitalList({ hospitals, users, inter
               <option value="upcoming">2026 Batch</option>
             </select>
           </div>
-          <div className="lg:col-span-1">
+          <div>
             <label className="block text-[10px] font-bold text-stone-400 uppercase mb-1">Expiry From</label>
             <input
               type="date"
