@@ -15,7 +15,7 @@ import {
   LabelList
 } from 'recharts';
 import { FileText, AlertCircle, CheckCircle2, Clock, TrendingUp, Filter, Search, X, ArrowUpDown, ChevronDown, Users, UserCheck, PhoneOff, Ban, UserPlus } from 'lucide-react';
-import { format, isAfter, isBefore, parseISO, differenceInDays, differenceInMonths, startOfDay, endOfDay, isWithinInterval } from 'date-fns';
+import { format, isAfter, isBefore, parseISO, differenceInDays, differenceInMonths, startOfDay, endOfDay, isWithinInterval, subMonths } from 'date-fns';
 import { cn } from '../lib/utils';
 import { generateHospitalReport } from '../lib/reportGenerator';
 
@@ -43,6 +43,8 @@ export const Dashboard = memo(function Dashboard({ hospitals, interactions, appl
   const [trendView, setTrendView] = useState<'count' | 'percent'>('count');
   const [expandedStates, setExpandedStates] = useState<Set<string>>(new Set());
   const [stateSort, setStateSort] = useState<{ field: 'name' | 'total' | 'rate', order: 'asc' | 'desc' }>({ field: 'total', order: 'desc' });
+  const [timelineProgram, setTimelineProgram] = useState<'all' | 'ELCP' | 'HCO' | 'SHCO' | 'ECO' | 'Other'>('all');
+  const [timelinePeriod, setTimelinePeriod] = useState<'all' | 'last6m' | 'last12m' | 'year2025' | 'year2026' | 'year2027'>('all');
 
   const states = useMemo(() => Array.from(new Set(hospitals.map(h => h.state))).sort(), [hospitals]);
 
@@ -443,6 +445,81 @@ export const Dashboard = memo(function Dashboard({ hospitals, interactions, appl
       };
     });
   }, [filteredHospitals]);
+
+  const renewalAppTimelineData = useMemo(() => {
+    const renewed = filteredHospitals.filter(h => h.reapplied && h.renewalApplicationDate);
+    
+    const filteredRenewed = renewed.filter(h => {
+      if (timelineProgram === 'all') return true;
+      const prog = h.reappliedProgram || 'Other';
+      if (timelineProgram === 'Other') {
+        return !['ELCP', 'HCO', 'SHCO', 'ECO'].includes(prog);
+      }
+      return prog === timelineProgram;
+    });
+
+    const groups: Record<string, { label: string; ELCP: number; HCO: number; SHCO: number; ECO: number; Other: number; total: number }> = {};
+
+    filteredRenewed.forEach(h => {
+      try {
+        const date = parseISO(h.renewalApplicationDate!);
+        
+        if (timelinePeriod !== 'all') {
+          const year = date.getFullYear();
+          const today = new Date();
+          if (timelinePeriod === 'last6m') {
+            const sixMonthsAgo = subMonths(today, 6);
+            if (isBefore(date, sixMonthsAgo)) return;
+          } else if (timelinePeriod === 'last12m') {
+            const twelveMonthsAgo = subMonths(today, 12);
+            if (isBefore(date, twelveMonthsAgo)) return;
+          } else if (timelinePeriod === 'year2025' && year !== 2025) {
+            return;
+          } else if (timelinePeriod === 'year2026' && year !== 2026) {
+            return;
+          } else if (timelinePeriod === 'year2027' && year !== 2027) {
+            return;
+          }
+        }
+
+        const monthLabel = format(date, 'MMM yyyy');
+        if (!groups[monthLabel]) {
+          groups[monthLabel] = {
+            label: monthLabel,
+            ELCP: 0,
+            HCO: 0,
+            SHCO: 0,
+            ECO: 0,
+            Other: 0,
+            total: 0
+          };
+        }
+
+        const prog = h.reappliedProgram || '';
+        if (prog === 'ELCP') groups[monthLabel].ELCP++;
+        else if (prog === 'HCO') groups[monthLabel].HCO++;
+        else if (prog === 'SHCO') groups[monthLabel].SHCO++;
+        else if (prog === 'ECO') groups[monthLabel].ECO++;
+        else groups[monthLabel].Other++;
+
+        groups[monthLabel].total++;
+      } catch (err) {
+        // Safe catch
+      }
+    });
+
+    const sortedLabels = Object.keys(groups).sort((a, b) => {
+      try {
+        const dateA = new Date(a);
+        const dateB = new Date(b);
+        return dateA.getTime() - dateB.getTime();
+      } catch {
+        return 0;
+      }
+    });
+
+    return sortedLabels.map(label => groups[label]);
+  }, [filteredHospitals, timelineProgram, timelinePeriod]);
 
   const notRenewedBreakdown = useMemo(() => {
     const notRenewedHospitals = filteredHospitals.filter(h => !h.reapplied);
@@ -1113,6 +1190,205 @@ export const Dashboard = memo(function Dashboard({ hospitals, interactions, appl
               </Bar>
             </BarChart>
           </ResponsiveContainer>
+        </div>
+      </div>
+
+      {/* Renewal Application Timeline (MoM Applications Received) */}
+      <div className="bg-white p-8 rounded-3xl border border-stone-200 shadow-sm space-y-6">
+        <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-6 border-b border-stone-100 pb-6">
+          <div className="space-y-1">
+            <h3 className="text-lg font-serif font-bold text-stone-900">Renewal Application Timeline (MoM)</h3>
+            <p className="text-xs text-stone-500">Bifurcated monthly distribution of submitted renewal applications under different programs.</p>
+          </div>
+          
+          <div className="flex flex-wrap items-center gap-4">
+            {/* Period Selector */}
+            <div className="flex flex-col gap-1">
+              <span className="text-[9px] font-black uppercase text-stone-400 tracking-wider">Timeframe Zoom</span>
+              <div className="flex bg-stone-100 p-1 rounded-xl">
+                {[
+                  { value: 'all', label: 'All-Time' },
+                  { value: 'last6m', label: 'Last 6M' },
+                  { value: 'last12m', label: 'Last 12M' },
+                  { value: 'year2025', label: '2025' },
+                  { value: 'year2026', label: '2026' },
+                  { value: 'year2027', label: '2027' }
+                ].map((item) => (
+                  <button
+                    key={item.value}
+                    onClick={() => setTimelinePeriod(item.value as any)}
+                    className={cn(
+                      "px-3 py-1.5 text-[10px] font-bold rounded-lg transition-all whitespace-nowrap",
+                      timelinePeriod === item.value ? "bg-white text-stone-900 shadow-sm" : "text-stone-500 hover:text-stone-700"
+                    )}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Program Segment Highlight */}
+            <div className="flex flex-col gap-1">
+              <span className="text-[9px] font-black uppercase text-stone-400 tracking-wider">Program Filter</span>
+              <div className="flex bg-stone-100 p-1 rounded-xl">
+                {[
+                  { value: 'all', label: 'All' },
+                  { value: 'ELCP', label: 'ELCP' },
+                  { value: 'HCO', label: 'HCO' },
+                  { value: 'SHCO', label: 'SHCO' },
+                  { value: 'ECO', label: 'ECO' },
+                  { value: 'Other', label: 'Other/Blank' }
+                ].map((item) => (
+                  <button
+                    key={item.value}
+                    onClick={() => setTimelineProgram(item.value as any)}
+                    className={cn(
+                      "px-3 py-1.5 text-[10px] font-bold rounded-lg transition-all whitespace-nowrap",
+                      timelineProgram === item.value ? "bg-white text-stone-900 shadow-sm" : "text-stone-500 hover:text-stone-700"
+                    )}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="px-4 py-3 bg-stone-50 rounded-2xl text-stone-600 text-xs font-bold font-mono border border-stone-100 flex flex-col items-center justify-center self-end h-[42px]">
+              <span className="text-[9px] font-bold text-stone-400 uppercase tracking-widest leading-none">Total Shown</span>
+              <span className="text-base font-black text-stone-900 leading-none mt-1">
+                {renewalAppTimelineData.reduce((acc, curr) => acc + (curr.total || 0), 0)}
+              </span>
+            </div>
+          </div>
+        </div>
+
+        {/* Legend */}
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+          {[
+            { label: 'ELCP', color: 'bg-emerald-500', desc: 'Entry Level Certification' },
+            { label: 'HCO', color: 'bg-blue-500', desc: 'Healthcare Organization' },
+            { label: 'SHCO', color: 'bg-purple-500', desc: 'Small Healthcare Org' },
+            { label: 'ECO', color: 'bg-amber-500', desc: 'Emergency Care Center' },
+            { label: 'Other/Blank', color: 'bg-stone-500', desc: 'Unspecified Type' },
+          ].map((item, i) => (
+            <div key={i} className="flex flex-col gap-0.5 p-2 rounded-xl bg-stone-50/50 border border-stone-100">
+              <div className="flex items-center gap-1.5">
+                <div className={cn("w-2.5 h-2.5 rounded-full", item.color)} />
+                <span className="text-[10px] font-bold text-stone-900">{item.label}</span>
+              </div>
+              <span className="text-[9px] text-stone-400 pl-4">{item.desc}</span>
+            </div>
+          ))}
+        </div>
+
+        <div className="h-80">
+          {renewalAppTimelineData.length > 0 ? (
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={renewalAppTimelineData} margin={{ top: 25, right: 30, left: -20, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f5f5f4" />
+                <XAxis 
+                  dataKey="label" 
+                  axisLine={false} 
+                  tickLine={false} 
+                  fontSize={10} 
+                  tick={{ fill: '#78716c' }}
+                  dy={10}
+                />
+                <YAxis 
+                  axisLine={false} 
+                  tickLine={false} 
+                  fontSize={10} 
+                  tick={{ fill: '#78716c' }}
+                  allowDecimals={false}
+                />
+                <Tooltip 
+                  cursor={{ fill: '#fafaf9' }}
+                  contentStyle={{ 
+                    borderRadius: '16px', 
+                    border: '1px solid #e7e5e4',
+                    boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)',
+                    fontSize: '11px'
+                  }}
+                  content={({ active, payload, label }) => {
+                    if (!active || !payload || !payload.length) return null;
+                    const data = payload[0].payload;
+                    return (
+                      <div className="bg-white p-4 rounded-xl border border-stone-200 shadow-md space-y-2">
+                        <strong className="text-xs text-stone-900 block border-b border-stone-100 pb-1">{label}</strong>
+                        <div className="space-y-1.5 text-xs text-stone-600">
+                          <div className="flex justify-between gap-6">
+                            <span className="flex items-center gap-1.5"><span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>ELCP:</span>
+                            <span className="font-bold text-stone-950">{data.ELCP}</span>
+                          </div>
+                          <div className="flex justify-between gap-6">
+                            <span className="flex items-center gap-1.5"><span className="w-1.5 h-1.5 rounded-full bg-blue-500"></span>HCO:</span>
+                            <span className="font-bold text-stone-950">{data.HCO}</span>
+                          </div>
+                          <div className="flex justify-between gap-6">
+                            <span className="flex items-center gap-1.5"><span className="w-1.5 h-1.5 rounded-full bg-purple-500"></span>SHCO:</span>
+                            <span className="font-bold text-stone-950">{data.SHCO}</span>
+                          </div>
+                          <div className="flex justify-between gap-6">
+                            <span className="flex items-center gap-1.5"><span className="w-1.5 h-1.5 rounded-full bg-amber-500"></span>ECO:</span>
+                            <span className="font-bold text-stone-950">{data.ECO}</span>
+                          </div>
+                          <div className="flex justify-between gap-6">
+                            <span className="flex items-center gap-1.5"><span className="w-1.5 h-1.5 rounded-full bg-stone-500"></span>Other:</span>
+                            <span className="font-bold text-stone-950">{data.Other}</span>
+                          </div>
+                          <div className="flex justify-between gap-6 pt-1 border-t border-stone-100 font-bold text-stone-900">
+                            <span>Total Received:</span>
+                            <span>{data.total}</span>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  }}
+                />
+                <Bar dataKey="ELCP" stackId="p" fill="#10b981" barSize={40}>
+                  <LabelList dataKey="ELCP" content={(props: any) => renderStackLabel(props)} />
+                </Bar>
+                <Bar dataKey="HCO" stackId="p" fill="#3b82f6" barSize={40}>
+                  <LabelList dataKey="HCO" content={(props: any) => renderStackLabel(props)} />
+                </Bar>
+                <Bar dataKey="SHCO" stackId="p" fill="#8b5cf6" barSize={40}>
+                  <LabelList dataKey="SHCO" content={(props: any) => renderStackLabel(props)} />
+                </Bar>
+                <Bar dataKey="ECO" stackId="p" fill="#f59e0b" barSize={40}>
+                  <LabelList dataKey="ECO" content={(props: any) => renderStackLabel(props)} />
+                </Bar>
+                <Bar dataKey="Other" stackId="p" fill="#78716c" radius={[6, 6, 0, 0]} barSize={40}>
+                  <LabelList dataKey="Other" content={(props: any) => renderStackLabel(props)} />
+                  <LabelList 
+                    dataKey="total" 
+                    position="top" 
+                    offset={8}
+                    content={(props: any) => {
+                      const { x, y, width, value } = props;
+                      if (!value) return null;
+                      return (
+                        <text 
+                          x={x + width / 2} 
+                          y={y - 8} 
+                          fill="#1c1917" 
+                          textAnchor="middle" 
+                          fontSize={10} 
+                          fontWeight="black"
+                        >
+                          {value}
+                        </text>
+                      );
+                    }} 
+                  />
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          ) : (
+            <div className="h-full flex items-center justify-center text-stone-400 italic text-sm border-2 border-dashed border-stone-100 rounded-3xl bg-stone-50/50">
+              No renewal application date records exist to plot timeline under the selected filters
+            </div>
+          )}
         </div>
       </div>
 

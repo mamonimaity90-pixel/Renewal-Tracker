@@ -76,6 +76,8 @@ export const HospitalList = memo(function HospitalList({ hospitals, users, inter
   const [filterEffortLed, setFilterEffortLed] = useState(false);
   const [filterDateStart, setFilterDateStart] = useState('');
   const [filterDateEnd, setFilterDateEnd] = useState('');
+  const [filterRenewalAppStart, setFilterRenewalAppStart] = useState('');
+  const [filterRenewalAppEnd, setFilterRenewalAppEnd] = useState('');
   const [filterFollowUp, setFilterFollowUp] = useState<'all' | 'today' | 'overdue' | 'upcoming'>('all');
   const [filterReason, setFilterReason] = useState<string>('all');
   const [activeHospitalId, setActiveHospitalId] = useState<string | null>(null);
@@ -173,6 +175,17 @@ export const HospitalList = memo(function HospitalList({ hospitals, users, inter
           if (filterDateEnd && isAfter(expiry, parseISO(filterDateEnd))) matchesDate = false;
         }
 
+        let matchesRenewalAppDate = true;
+        if (filterRenewalAppStart || filterRenewalAppEnd) {
+          if (!h.reapplied || !h.renewalApplicationDate) {
+            matchesRenewalAppDate = false;
+          } else {
+            const renewalApp = parseISO(h.renewalApplicationDate);
+            if (filterRenewalAppStart && isBefore(renewalApp, parseISO(filterRenewalAppStart))) matchesRenewalAppDate = false;
+            if (filterRenewalAppEnd && isAfter(renewalApp, parseISO(filterRenewalAppEnd))) matchesRenewalAppDate = false;
+          }
+        }
+
         const matchesEffort = !filterEffortLed || effortLedHospitals.has(h.id);
 
         let matchesFollowUp = true;
@@ -190,7 +203,7 @@ export const HospitalList = memo(function HospitalList({ hospitals, users, inter
           matchesFollowUp = false;
         }
 
-        return matchesSearch && matchesUser && matchesState && matchesBatch && matchesRenewal && matchesConnection && matchesReason && matchesDate && matchesEffort && matchesFollowUp;
+        return matchesSearch && matchesUser && matchesState && matchesBatch && matchesRenewal && matchesConnection && matchesReason && matchesDate && matchesRenewalAppDate && matchesEffort && matchesFollowUp;
       })
       .map(h => {
         const lastAtt = latestInteractionsMap.get(h.id);
@@ -214,7 +227,7 @@ export const HospitalList = memo(function HospitalList({ hospitals, users, inter
         if (valA > valB) return sortOrder === 'asc' ? 1 : -1;
         return 0;
       });
-  }, [hospitals, hospitalInteractionsMap, latestInteractionsMap, search, filterUsers, filterStates, filterRenewal, filterConnection, filterBatch, filterDateStart, filterDateEnd, filterEffortLed, filterFollowUp, filterReason, sortField, sortOrder, effortLedHospitals]);
+  }, [hospitals, hospitalInteractionsMap, latestInteractionsMap, search, filterUsers, filterStates, filterRenewal, filterConnection, filterBatch, filterDateStart, filterDateEnd, filterRenewalAppStart, filterRenewalAppEnd, filterEffortLed, filterFollowUp, filterReason, sortField, sortOrder, effortLedHospitals]);
 
   const totalPages = Math.ceil(filteredHospitals.length / ITEMS_PER_PAGE);
   const paginatedHospitals = filteredHospitals.slice(
@@ -396,7 +409,7 @@ export const HospitalList = memo(function HospitalList({ hospitals, users, inter
             />
           </div>
           <div className="flex items-center gap-4">
-            {(search || filterUsers.length > 0 || filterStates.length > 0 || filterRenewal !== 'all' || filterConnection !== 'all' || filterReason !== 'all' || filterDateStart || filterDateEnd) && (
+            {(search || filterUsers.length > 0 || filterStates.length > 0 || filterRenewal !== 'all' || filterConnection !== 'all' || filterReason !== 'all' || filterDateStart || filterDateEnd || filterRenewalAppStart || filterRenewalAppEnd) && (
               <button 
                 onClick={() => {
                   setSearch('');
@@ -409,6 +422,8 @@ export const HospitalList = memo(function HospitalList({ hospitals, users, inter
                   setFilterFollowUp('all');
                   setFilterDateStart('');
                   setFilterDateEnd('');
+                  setFilterRenewalAppStart('');
+                  setFilterRenewalAppEnd('');
                   setCurrentPage(1);
                 }}
                 className="text-xs font-bold text-red-500 hover:text-red-700 flex items-center gap-1 px-3 py-2 bg-red-50 rounded-xl transition-colors"
@@ -438,7 +453,7 @@ export const HospitalList = memo(function HospitalList({ hospitals, users, inter
           </div>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-4 lg:grid-cols-8 gap-4 pt-2 border-t border-stone-100">
+        <div className="grid grid-cols-1 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-12 gap-4 pt-2 border-t border-stone-100">
           <div>
             <label className="block text-[10px] font-bold text-stone-400 uppercase mb-1">Assigned To</label>
             <MultiSelect
@@ -557,6 +572,30 @@ export const HospitalList = memo(function HospitalList({ hospitals, users, inter
               className="w-full p-2 bg-stone-50 border-none rounded-lg text-xs focus:ring-1 focus:ring-stone-200"
               value={filterDateEnd}
               onChange={(e) => setFilterDateEnd(e.target.value)}
+            />
+          </div>
+          <div>
+            <label className="block text-[10px] font-bold text-stone-400 uppercase mb-1">Renewal Rec. From</label>
+            <input
+              type="date"
+              className="w-full p-2 bg-stone-50 border-none rounded-lg text-xs focus:ring-1 focus:ring-stone-200"
+              value={filterRenewalAppStart}
+              onChange={(e) => {
+                setFilterRenewalAppStart(e.target.value);
+                setCurrentPage(1);
+              }}
+            />
+          </div>
+          <div>
+            <label className="block text-[10px] font-bold text-stone-400 uppercase mb-1">Renewal Rec. To</label>
+            <input
+              type="date"
+              className="w-full p-2 bg-stone-50 border-none rounded-lg text-xs focus:ring-1 focus:ring-stone-200"
+              value={filterRenewalAppEnd}
+              onChange={(e) => {
+                setFilterRenewalAppEnd(e.target.value);
+                setCurrentPage(1);
+              }}
             />
           </div>
         </div>
@@ -798,9 +837,12 @@ export const HospitalList = memo(function HospitalList({ hospitals, users, inter
                   setFilterStates([]);
                   setFilterDateStart('');
                   setFilterDateEnd('');
+                  setFilterRenewalAppStart('');
+                  setFilterRenewalAppEnd('');
                   setFilterFollowUp('all');
                   setFilterEffortLed(false);
                   setFilterReason('all');
+                  setCurrentPage(1);
                 }}
                 className="px-6 py-3 bg-stone-900 text-white rounded-2xl font-bold text-sm hover:bg-stone-800 transition-all shadow-lg shadow-stone-200"
               >
