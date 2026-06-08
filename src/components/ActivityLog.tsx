@@ -349,7 +349,15 @@ export function ActivityLog({ hospitals, interactions, users, currentUser }: Act
                       {hospital?.reapplied && 
                        hospital?.renewalApplicationDate && 
                        log.result === 'Connected' &&
-                       isBefore(parseISO(log.timestamp), parseISO(hospital.renewalApplicationDate)) && (
+                       (() => {
+                         try {
+                           const interDate = startOfDay(parseISO(log.timestamp));
+                           const renewalDate = startOfDay(parseISO(hospital.renewalApplicationDate));
+                           return isBefore(interDate, renewalDate) || interDate.getTime() === renewalDate.getTime();
+                         } catch {
+                           return false;
+                         }
+                       })() && (
                         <span className="text-[10px] bg-stone-900 text-white font-black px-2 py-0.5 rounded-md uppercase tracking-wider flex items-center gap-1">
                           <CheckCircle2 className="w-3 h-3 text-emerald-400" />
                           Effort-Led Conversion

@@ -222,12 +222,17 @@ export const Dashboard = memo(function Dashboard({ hospitals, interactions, appl
       
       const effortLedCount = assignedHospitals.filter(h => {
         if (!h.reapplied || !h.renewalApplicationDate) return false;
-        const renewalDate = parseISO(h.renewalApplicationDate);
         const hInteractions = hospitalInteractionsMap.get(h.id) || [];
-        return hInteractions.some(i => 
-          (i.result === 'Connected' || i.result === 'Direct Update') &&
-          isBefore(parseISO(i.timestamp), renewalDate)
-        );
+        return hInteractions.some(i => {
+          if (i.result !== 'Connected') return false;
+          try {
+            const interDate = startOfDay(parseISO(i.timestamp));
+            const renewalDate = startOfDay(parseISO(h.renewalApplicationDate!));
+            return isBefore(interDate, renewalDate) || interDate.getTime() === renewalDate.getTime();
+          } catch {
+            return false;
+          }
+        });
       }).length;
 
       const pendingCount = assignedHospitals.filter(h => !h.reapplied).length;
@@ -562,12 +567,17 @@ export const Dashboard = memo(function Dashboard({ hospitals, interactions, appl
     let totalInteractionsForRenewed = 0;
 
     renewedHospitals.forEach(h => {
-      const renewalDate = parseISO(h.renewalApplicationDate!);
       const hInteractions = hospitalInteractionsMap.get(h.id) || [];
-      const interactionsBeforeRenewal = hInteractions.filter(i => 
-        (i.result === 'Connected' || i.result === 'Direct Update') &&
-        isBefore(parseISO(i.timestamp), renewalDate)
-      );
+      const interactionsBeforeRenewal = hInteractions.filter(i => {
+        if (i.result !== 'Connected') return false;
+        try {
+          const interDate = startOfDay(parseISO(i.timestamp));
+          const renewalDate = startOfDay(parseISO(h.renewalApplicationDate!));
+          return isBefore(interDate, renewalDate) || interDate.getTime() === renewalDate.getTime();
+        } catch {
+          return false;
+        }
+      });
 
       if (interactionsBeforeRenewal.length > 0) {
         convertedAfterInteraction++;

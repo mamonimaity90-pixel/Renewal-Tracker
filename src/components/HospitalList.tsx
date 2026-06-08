@@ -108,13 +108,18 @@ export const HospitalList = memo(function HospitalList({ hospitals, users, inter
     const set = new Set<string>();
     hospitals.forEach(h => {
       if (h.reapplied && h.renewalApplicationDate) {
-        const renewalDate = parseISO(h.renewalApplicationDate);
         const hospitalInteractions = hospitalInteractionsMap.get(h.id) || [];
         // interactions are sorted DESC, so we can't easily break early, but this is still O(M) total
-        const hasInteractionBeforeRenewal = hospitalInteractions.some(i => 
-          i.result === 'Connected' &&
-          isBefore(parseISO(i.timestamp), renewalDate)
-        );
+        const hasInteractionBeforeRenewal = hospitalInteractions.some(i => {
+          if (i.result !== 'Connected') return false;
+          try {
+            const interDate = startOfDay(parseISO(i.timestamp));
+            const renewalDate = startOfDay(parseISO(h.renewalApplicationDate!));
+            return isBefore(interDate, renewalDate) || interDate.getTime() === renewalDate.getTime();
+          } catch {
+            return false;
+          }
+        });
         if (hasInteractionBeforeRenewal) set.add(h.id);
       }
     });
@@ -1104,7 +1109,7 @@ function LogInteractionModal({ hospital, interactions, users, isAdmin, onClose }
         dataToSave.verificationStatus = 'Pending';
       }
 
-      if (formData.result !== 'Connected') {
+      if (formData.result !== 'Connected' && formData.result !== 'Direct Update') {
         delete dataToSave.reason;
         delete dataToSave.remarks;
         delete dataToSave.followUpDate;

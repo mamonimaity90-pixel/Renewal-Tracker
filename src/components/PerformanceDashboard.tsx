@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { Hospital, Interaction, Zone, User, PerformanceStats } from '../types';
-import { parseISO, isBefore, isAfter, subMonths, startOfYear, endOfYear, format, startOfMonth, endOfMonth, isWithinInterval } from 'date-fns';
+import { parseISO, isBefore, isAfter, subMonths, startOfYear, endOfYear, format, startOfMonth, endOfMonth, isWithinInterval, startOfDay } from 'date-fns';
 import { Trophy, Target, AlertTriangle, TrendingUp, Users, Calendar, ChevronDown, Filter, Info, HelpCircle } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, PieChart, Pie } from 'recharts';
 
@@ -142,6 +142,14 @@ export function PerformanceDashboard({ hospitals, interactions, zones, users }: 
       statsMap.set(u.uid, { userId: u.uid, name: u.name, interactions: 0, conversions: 0, points: 0 });
     });
 
+    const hospitalInteractionsMap = new Map<string, Interaction[]>();
+    interactions.forEach(i => {
+      if (!hospitalInteractionsMap.has(i.hospitalId)) {
+        hospitalInteractionsMap.set(i.hospitalId, []);
+      }
+      hospitalInteractionsMap.get(i.hospitalId)!.push(i);
+    });
+
     const isInRange = (dateStr?: string) => {
       if (!dateStr) return false;
       try {
@@ -166,10 +174,24 @@ export function PerformanceDashboard({ hospitals, interactions, zones, users }: 
     // Count renewals (effort-led) in range
     hospitals.forEach(h => {
       if (h.reapplied && h.renewalApplicationDate && isInRange(h.renewalApplicationDate) && h.assignedTo) {
-        const stats = statsMap.get(h.assignedTo);
-        if (stats) {
-          stats.conversions += 1;
-          stats.points += 5; // 5 points per renewal
+        const hInteractions = hospitalInteractionsMap.get(h.id) || [];
+        const hasOutreachBeforeOrSameDay = hInteractions.some(i => {
+          if (i.result !== 'Connected') return false;
+          try {
+            const interDate = startOfDay(parseISO(i.timestamp));
+            const renewalDate = startOfDay(parseISO(h.renewalApplicationDate!));
+            return isBefore(interDate, renewalDate) || interDate.getTime() === renewalDate.getTime();
+          } catch {
+            return false;
+          }
+        });
+
+        if (hasOutreachBeforeOrSameDay) {
+          const stats = statsMap.get(h.assignedTo);
+          if (stats) {
+            stats.conversions += 1;
+            stats.points += 5; // 5 points per renewal
+          }
         }
       }
     });
