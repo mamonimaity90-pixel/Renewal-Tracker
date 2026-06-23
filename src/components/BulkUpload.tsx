@@ -4,15 +4,18 @@ import { db, auth } from '../firebase';
 import { collection, addDoc, updateDoc, doc, writeBatch } from 'firebase/firestore';
 import { Upload, X, CheckCircle2, AlertCircle, Loader2 } from 'lucide-react';
 import { format, parse } from 'date-fns';
-import { Hospital, User } from '../types';
+import { Hospital, User, Zone } from '../types';
+import { createAuditLog } from '../lib/audit';
 
 interface BulkUploadProps {
   onClose: () => void;
   users: User[];
   existingHospitals: Hospital[];
+  zones: Zone[];
+  currentUser: User | null;
 }
 
-export function BulkUpload({ onClose, users, existingHospitals }: BulkUploadProps) {
+export function BulkUpload({ onClose, users, existingHospitals, zones, currentUser }: BulkUploadProps) {
   const [file, setFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
   const [results, setResults] = useState<{ success: number; updated: number; failed: number; errors: string[] } | null>(null);
@@ -187,6 +190,28 @@ export function BulkUpload({ onClose, users, existingHospitals }: BulkUploadProp
                 const matchedUser = userByName.get(String(teamMemberName).toLowerCase().trim());
                 if (matchedUser) {
                   assignedToUid = matchedUser.uid;
+                } else {
+                  assignedToUid = '';
+                }
+              }
+
+              // Zone compatibility check to prevent mismatched automatic allocation
+              const rowState = getCellValue(row, ['State', 'Province', 'Region', 'State Name']) || existing?.state || '';
+              if (assignedToUid && rowState) {
+                const assignedUser = users.find(u => u.uid === assignedToUid);
+                if (assignedUser && assignedUser.zoneId) {
+                  const assignedUserZone = zones.find(z => z.id === assignedUser.zoneId);
+                  const isCompatible = assignedUserZone?.states.some(
+                    s => s.toLowerCase().trim() === String(rowState).toLowerCase().trim()
+                  ) ?? false;
+                  
+                  if (!isCompatible) {
+                    // Revert to unassigned to ensure proper allocation structure
+                    assignedToUid = '';
+                    errors.push(
+                      `Row ${i + chunk.indexOf(row) + 1} (${hospitalName || appNo}): Unassigned team member "${teamMemberName}" because they are in the "${assignedUserZone?.name || 'Unknown'}" zone, which does not cover the case state "${rowState}".`
+                    );
+                  }
                 }
               }
 
@@ -299,6 +324,16 @@ export function BulkUpload({ onClose, users, existingHospitals }: BulkUploadProp
         }
 
         setResults({ success: successCount, updated: updatedCount, failed: failedCount, errors });
+        createAuditLog({
+          itemId: 'bulk-upload-' + Date.now(),
+          itemName: file ? file.name : 'Bulk CSV Upload',
+          collectionName: 'hospitals',
+          action: 'bulk_upload',
+          currentUser,
+          newData: {
+            status: `Successfully imported ${successCount} new hospitals and updated ${updatedCount} existing entries.`
+          }
+        });
         setUploading(false);
       },
       error: (error) => {

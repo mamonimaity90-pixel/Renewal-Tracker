@@ -18,6 +18,7 @@ import { TeamManagement } from './components/TeamManagement';
 import { PerformanceDashboard } from './components/PerformanceDashboard';
 import { ActivityLog } from './components/ActivityLog';
 import { VerificationQueue } from './components/VerificationQueue';
+import { AuditLogList } from './components/AuditLogList';
 import { ReportScheduler } from './components/ReportScheduler';
 import { SettingsManager } from './components/SettingsManager';
 import { LogIn, LogOut, Loader2, Mail, Lock, User as UserIcon, AlertCircle, Clock, Ban, AlertTriangle, RotateCw } from 'lucide-react';
@@ -482,6 +483,8 @@ export default function App() {
           users={users} 
           interactions={interactions}
           isAdmin={user.role === 'admin'} 
+          zones={zones}
+          currentUser={user}
         />
       )}
       {activeTab === 'team' && user.role === 'admin' && (
@@ -493,10 +496,14 @@ export default function App() {
           hospitals={hospitals} 
           users={users} 
           currentUser={user}
+          zones={zones}
         />
       )}
       {activeTab === 'logs' && (
         <ActivityLog hospitals={hospitals} interactions={interactions} users={users} currentUser={user} />
+      )}
+      {activeTab === 'audit' && user.role === 'admin' && (
+        <AuditLogList users={users} currentUser={user} />
       )}
       {activeTab === 'settings' && user.role === 'admin' && (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-8">

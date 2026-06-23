@@ -92,3 +92,20 @@ export interface Application {
   programType: string;
   status: 'Applied' | 'Under Review' | 'Approved' | 'Rejected';
 }
+
+export interface AuditLog {
+  id: string;
+  itemId: string;
+  itemName: string;
+  collection: string;
+  userId: string;
+  userName: string;
+  userEmail: string;
+  action: 'create' | 'update' | 'delete' | 'bulk_assign' | 'bulk_upload' | 'verify';
+  timestamp: string;
+  changes: {
+    field: string;
+    oldValue: any;
+    newValue: any;
+  }[];
+}

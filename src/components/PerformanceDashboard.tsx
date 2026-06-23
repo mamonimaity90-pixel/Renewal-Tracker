@@ -32,6 +32,11 @@ export function PerformanceDashboard({ hospitals, interactions, zones, users }: 
     activeOpportunitiesCount: number;
     renewedOpportunitiesCount: number;
     balancedScore: number;
+    revivals2023: number;
+    revivals2024: number;
+    revivals2025: number;
+    revivals2026: number;
+    timelyRenewals2026: number;
   }
 
   const performanceStats = useMemo(() => {
@@ -76,7 +81,12 @@ export function PerformanceDashboard({ hospitals, interactions, zones, users }: 
         totalZoneVolume,
         activeOpportunitiesCount,
         renewedOpportunitiesCount,
-        balancedScore: 0
+        balancedScore: 0,
+        revivals2023: 0,
+        revivals2024: 0,
+        revivals2025: 0,
+        revivals2026: 0,
+        timelyRenewals2026: 0
       });
     });
 
@@ -97,33 +107,48 @@ export function PerformanceDashboard({ hospitals, interactions, zones, users }: 
         }
       };
 
-      // Rule 1: Early Renewal (+3 points)
-      // Check if the renewal application happened WITHIN the selected range
-      if (h.reapplied && h.renewalApplicationDate && isInRange(h.renewalApplicationDate)) {
-        const renewalDate = parseISO(h.renewalApplicationDate);
-        const threeMonthsPrior = subMonths(expiryDate, 3);
-        if (isBefore(renewalDate, threeMonthsPrior)) {
-          stats.points += 3;
-          stats.earlyRenewals += 1;
-        }
-      }
+      const year = expiryDate.getFullYear();
 
-      // Rule 2: Vintage Recovery (+10 points)
-      // Check if the recovery application happened WITHIN the selected range
+      // Check if hospital reapplied within the selected range
       if (h.reapplied && h.renewalApplicationDate && isInRange(h.renewalApplicationDate)) {
-        const year = expiryDate.getFullYear();
-        if (year >= 2023 && year <= 2025) {
+        if (year === 2023) {
+          stats.points += 20;
+          stats.vintageRecoveries += 1;
+          stats.revivals2023 += 1;
+        } else if (year === 2024) {
+          stats.points += 15;
+          stats.vintageRecoveries += 1;
+          stats.revivals2024 += 1;
+        } else if (year === 2025) {
+          stats.points += 10;
+          stats.vintageRecoveries += 1;
+          stats.revivals2025 += 1;
+        } else if (year === 2026) {
+          const renewalDate = parseISO(h.renewalApplicationDate);
+          if (isBefore(renewalDate, expiryDate) || renewalDate.getTime() === expiryDate.getTime()) {
+            // Renewed before expiry of 2026 (+20 points)
+            stats.points += 20;
+            stats.earlyRenewals += 1;
+            stats.timelyRenewals2026 += 1;
+          } else {
+            // 2026 expired but revived eventually (+5 points)
+            stats.points += 5;
+            stats.vintageRecoveries += 1;
+            stats.revivals2026 += 1;
+          }
+        } else {
+          // Fallback for other years (treated as standard +10 points recovery)
           stats.points += 10;
           stats.vintageRecoveries += 1;
         }
       }
 
-      // Rule 3: Fail to bring back (-1 point)
+      // Rule: Active hospital expired (-10 points)
       // Check if the EXPIRY happened WITHIN the selected range
       if (!h.reapplied && isInRange(h.expiryDate)) {
         const now = new Date();
         if (isBefore(expiryDate, now)) {
-          stats.points -= 1;
+          stats.points -= 10;
           stats.expirations += 1;
         }
       }
@@ -324,54 +349,63 @@ export function PerformanceDashboard({ hospitals, interactions, zones, users }: 
 
         {showScoringGuide && (
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 animate-in fade-in slide-in-from-top-2 duration-300">
-            {/* Rule 1: Early Renewal card */}
+            {/* Rule 1: 2026 Timely Retention card */}
             <div className="p-5 rounded-2xl bg-emerald-50/50 border border-emerald-100 flex flex-col justify-between">
               <div>
                 <div className="flex items-center justify-between mb-3">
-                  <span className="text-[10px] uppercase font-black text-emerald-800 tracking-wider">Early Success</span>
-                  <span className="px-2.5 py-1 bg-emerald-600 text-white text-xs font-mono font-bold rounded-lg">+3 Points</span>
+                  <span className="text-[10px] uppercase font-black text-emerald-800 tracking-wider">Timely Retention</span>
+                  <span className="px-2.5 py-1 bg-emerald-600 text-white text-xs font-mono font-bold rounded-lg">+20 Points</span>
                 </div>
-                <h4 className="font-serif font-bold text-stone-950 text-base mb-1">Early Renewal Task</h4>
+                <h4 className="font-serif font-bold text-stone-950 text-base mb-1">2026 Timely Renewal</h4>
                 <p className="text-stone-600 text-xs leading-relaxed">
-                  Issued to the zone whenever a hospital submits their renewal application <strong className="text-emerald-800">3 or more months prior</strong> to their compliance expiry date.
+                  Issued to the zone whenever a 2026 expiring hospital submits their renewal application <strong className="text-emerald-800">on or before</strong> their compliance expiry date.
                 </p>
               </div>
               <div className="mt-4 pt-3 border-t border-emerald-100 text-[10px] text-emerald-700 font-bold uppercase tracking-wider">
-                Focuses on Proactive Retention
+                Rewards Proactive Timely Retention
               </div>
             </div>
 
-            {/* Rule 2: Vintage Recovery card */}
+            {/* Rule 2: Vintage & Late Revivals card */}
             <div className="p-5 rounded-2xl bg-amber-50/50 border border-amber-100 flex flex-col justify-between">
               <div>
                 <div className="flex items-center justify-between mb-3">
-                  <span className="text-[10px] uppercase font-black text-amber-800 tracking-wider">Strategic Recovery</span>
-                  <span className="px-2.5 py-1 bg-amber-600 text-white text-xs font-mono font-bold rounded-lg">+10 Points</span>
+                  <span className="text-[10px] uppercase font-black text-amber-800 tracking-wider">Historical Save</span>
+                  <span className="px-2.5 py-1 bg-amber-600 text-white text-xs font-mono font-bold rounded-lg">+10 to +20 Pts</span>
                 </div>
-                <h4 className="font-serif font-bold text-stone-950 text-base mb-1">Vintage Recovery Block</h4>
-                <p className="text-stone-600 text-xs leading-relaxed">
-                  Issued when a historically lost hospital from a past compliance cohort (<strong className="text-amber-800">2023 - 2025</strong>) is successfully won back and reapplies.
-                </p>
+                <h4 className="font-serif font-bold text-stone-950 text-base mb-1">Vintage Revivals</h4>
+                <div className="text-stone-600 text-xs space-y-1.5 leading-relaxed">
+                  <p>Rewards successfully reclaiming historically lost facilities from compliance cohorts:</p>
+                  <div className="bg-white/60 p-2 rounded-xl border border-stone-200/50 space-y-1 font-mono text-[11px] text-amber-900">
+                    <div className="flex justify-between"><span>2023 Cohort Revival:</span> <strong>+20 pts</strong></div>
+                    <div className="flex justify-between"><span>2024 Cohort Revival:</span> <strong>+15 pts</strong></div>
+                    <div className="flex justify-between"><span>2025 Cohort Revival:</span> <strong>+10 pts</strong></div>
+                  </div>
+                </div>
               </div>
               <div className="mt-4 pt-3 border-t border-amber-100 text-[10px] text-amber-700 font-bold uppercase tracking-wider">
-                Rewards Hard-to-Win Retroactive Saves
+                Reclaiming Long-Lost Facilities
               </div>
             </div>
 
-            {/* Rule 3: Fail to Renew card */}
+            {/* Rule 3: 2026 Late Revival and Dropout card */}
             <div className="p-5 rounded-2xl bg-red-50/30 border border-red-100/60 flex flex-col justify-between">
               <div>
                 <div className="flex items-center justify-between mb-3">
-                  <span className="text-[10px] uppercase font-black text-red-800 tracking-wider">Compliance Drop</span>
-                  <span className="px-2.5 py-1 bg-red-500 text-white text-xs font-mono font-bold rounded-lg">-1 Point</span>
+                  <span className="text-[10px] uppercase font-black text-red-800 tracking-wider">Retention vs Loss</span>
+                  <span className="px-2.5 py-1 bg-red-500 text-white text-xs font-mono font-bold rounded-lg">+5 / -10 Pts</span>
                 </div>
-                <h4 className="font-serif font-bold text-stone-950 text-base mb-1">Compliance Expiration</h4>
-                <p className="text-stone-600 text-xs leading-relaxed">
-                  Deducted if a facility's compliance expiry date passes within the selected window, and they <strong className="text-red-800">fail to submit a reapplication</strong>.
-                </p>
+                <h4 className="font-serif font-bold text-stone-950 text-base mb-1">Late Save & Expirations</h4>
+                <div className="text-stone-600 text-xs space-y-2 leading-relaxed">
+                  <p>Balances the high penalty of direct expirations with recovery incentives:</p>
+                  <div className="bg-white/60 p-2 rounded-xl border border-stone-200/50 space-y-1 font-mono text-[11px]">
+                    <div className="flex justify-between text-emerald-800"><span>2026 Late Revival:</span> <strong>+5 pts</strong></div>
+                    <div className="flex justify-between text-rose-700"><span>Active Expired Drop:</span> <strong>-10 pts</strong></div>
+                  </div>
+                </div>
               </div>
               <div className="mt-4 pt-3 border-t border-red-100/60 text-[10px] text-red-700 font-bold uppercase tracking-wider">
-                Incentivizes Preventing Attrition
+                Incentivizes Constant Vigilance
               </div>
             </div>
 
@@ -471,12 +505,12 @@ export function PerformanceDashboard({ hospitals, interactions, zones, users }: 
             <div className="p-2 bg-blue-50 text-blue-600 rounded-xl">
               <Target className="w-5 h-5" />
             </div>
-            <h4 className="font-bold text-stone-900">Early Renewals</h4>
+            <h4 className="font-bold text-stone-900">Timely Retention</h4>
           </div>
           <p className="text-3xl font-serif font-bold text-stone-900">
-            {performanceStats.reduce((sum, s) => sum + s.earlyRenewals, 0)}
+            {performanceStats.reduce((sum, s) => sum + s.timelyRenewals2026, 0)}
           </p>
-          <p className="text-xs text-stone-400 mt-1">+3 points each</p>
+          <p className="text-xs text-stone-400 mt-1">+20 points each (2026)</p>
         </div>
 
         <div className="bg-white p-6 rounded-3xl border border-stone-200 shadow-sm">
@@ -489,7 +523,7 @@ export function PerformanceDashboard({ hospitals, interactions, zones, users }: 
           <p className="text-3xl font-serif font-bold text-stone-900">
             {performanceStats.reduce((sum, s) => sum + s.vintageRecoveries, 0)}
           </p>
-          <p className="text-xs text-stone-400 mt-1">+10 points each (2023-25)</p>
+          <p className="text-xs text-stone-400 mt-1">+5 to +20 pts (2023-26)</p>
         </div>
 
         <div className="bg-white p-6 rounded-3xl border border-stone-200 shadow-sm">
@@ -502,7 +536,7 @@ export function PerformanceDashboard({ hospitals, interactions, zones, users }: 
           <p className="text-3xl font-serif font-bold text-rose-600">
             {performanceStats.reduce((sum, s) => sum + s.expirations, 0)}
           </p>
-          <p className="text-xs text-stone-400 mt-1">-1 point each</p>
+          <p className="text-xs text-stone-400 mt-1">-10 points each</p>
         </div>
       </div>
 
@@ -576,13 +610,19 @@ export function PerformanceDashboard({ hospitals, interactions, zones, users }: 
                   </div>
 
                   {/* Gross points bifurcation equation */}
-                  <div className="mt-3 text-[10px] text-stone-500 font-mono bg-stone-100/80 p-2 rounded-xl border border-stone-200/50 flex flex-wrap gap-x-2 gap-y-0.5 items-center">
+                  <div className="mt-3 text-[10px] text-stone-500 font-mono bg-stone-100/80 p-2 rounded-xl border border-stone-200/50 flex flex-wrap gap-x-2 gap-y-1.5 items-center">
                     <span className="font-bold text-stone-600 uppercase tracking-wider text-[9px]">Bifurcation:</span>
-                    <span>({stat.earlyRenewals} early &times; +3)</span>
+                    <span>({stat.timelyRenewals2026} timely 2026 &times; +20)</span>
                     <span>+</span>
-                    <span>({stat.vintageRecoveries} vintage &times; +10)</span>
+                    <span>({stat.revivals2023} 2023 &times; +20)</span>
+                    <span>+</span>
+                    <span>({stat.revivals2024} 2024 &times; +15)</span>
+                    <span>+</span>
+                    <span>({stat.revivals2025} 2025 &times; +10)</span>
+                    <span>+</span>
+                    <span>({stat.revivals2026} late 2026 &times; +5)</span>
                     <span>-</span>
-                    <span>({stat.expirations} expired &times; 1)</span>
+                    <span>({stat.expirations} expired &times; 10)</span>
                     <span>=</span>
                     <strong className="text-stone-800 font-bold">{stat.points} Gross Pts</strong>
                   </div>

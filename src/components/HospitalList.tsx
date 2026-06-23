@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useRef, useEffect, memo } from 'react';
-import { Hospital, User, Interaction } from '../types';
+import { Hospital, User, Interaction, Zone } from '../types';
 import { 
   Search, 
   Filter, 
@@ -20,6 +20,7 @@ import {
   Loader2,
   ChevronDown,
   AlertCircle,
+  AlertTriangle,
   Download,
   Clock
 } from 'lucide-react';
@@ -29,12 +30,15 @@ import { db, auth } from '../firebase';
 import { collection, addDoc, updateDoc, doc, writeBatch, serverTimestamp } from 'firebase/firestore';
 import { cn } from '../lib/utils';
 import { BulkUpload } from './BulkUpload';
+import { createAuditLog } from '../lib/audit';
 
 interface HospitalListProps {
   hospitals: Hospital[];
   users: User[];
   interactions: Interaction[];
   isAdmin: boolean;
+  zones: Zone[];
+  currentUser: User | null;
 }
 
 const ITEMS_PER_PAGE = 50;
@@ -55,7 +59,7 @@ const INTERACTION_REASONS = [
   'Others'
 ];
 
-export const HospitalList = memo(function HospitalList({ hospitals, users, interactions, isAdmin }: HospitalListProps) {
+export const HospitalList = memo(function HospitalList({ hospitals, users, interactions, isAdmin, zones, currentUser }: HospitalListProps) {
   const [search, setSearch] = useState('');
   const [sortField, setSortField] = useState<keyof Hospital | 'lastAttemptedDate'>('expiryDate');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
@@ -66,6 +70,35 @@ export const HospitalList = memo(function HospitalList({ hospitals, users, inter
   const [currentPage, setCurrentPage] = useState(1);
   const [isBulkAssigning, setIsBulkAssigning] = useState(false);
   const [bulkAssignUserId, setBulkAssignUserId] = useState('');
+
+  const getUserZoneName = (userId: string) => {
+    const user = users.find(u => u.uid === userId);
+    if (!user || !user.zoneId) return 'No Zone';
+    const zone = zones?.find(z => z.id === user.zoneId);
+    return zone ? zone.name : 'Unknown';
+  };
+
+  const isUserCompatibleWithHospital = (userId: string, hospitalState: string) => {
+    if (!userId || !hospitalState) return true;
+    const user = users.find(u => u.uid === userId);
+    if (!user) return true;
+    if (!user.zoneId) return true;
+    const zone = zones?.find(z => z.id === user.zoneId);
+    if (!zone) return true;
+    return zone.states.some(s => s.toLowerCase().trim() === String(hospitalState).toLowerCase().trim());
+  };
+
+  const mismatchedCount = useMemo(() => {
+    if (!bulkAssignUserId) return 0;
+    let count = 0;
+    selectedIds.forEach(id => {
+      const hosp = hospitals.find(h => h.id === id);
+      if (hosp && !isUserCompatibleWithHospital(bulkAssignUserId, hosp.state)) {
+        count++;
+      }
+    });
+    return count;
+  }, [bulkAssignUserId, selectedIds, hospitals, zones, users]);
   
   // New Filter States
   const [filterUsers, setFilterUsers] = useState<string[]>([]);
@@ -275,6 +308,22 @@ export const HospitalList = memo(function HospitalList({ hospitals, users, inter
 
     try {
       await batch.commit();
+      selectedIds.forEach(id => {
+        const hospital = hospitals.find(h => h.id === id);
+        if (hospital) {
+          const oldAssignedName = users.find(u => u.uid === hospital.assignedTo)?.name || 'Unassigned';
+          const newAssignedName = users.find(u => u.uid === bulkAssignUserId)?.name || 'Unassigned';
+          createAuditLog({
+            itemId: id,
+            itemName: hospital.name,
+            collectionName: 'hospitals',
+            action: 'bulk_assign',
+            currentUser,
+            oldData: { assignedTo: oldAssignedName },
+            newData: { assignedTo: newAssignedName }
+          });
+        }
+      });
       setSelectedIds(new Set());
       setIsBulkAssigning(false);
       setBulkAssignUserId('');
@@ -284,8 +333,22 @@ export const HospitalList = memo(function HospitalList({ hospitals, users, inter
   };
 
   const assignHospital = async (hospitalId: string, userId: string) => {
+    const hospital = hospitals.find(h => h.id === hospitalId);
     try {
       await updateDoc(doc(db, 'hospitals', hospitalId), { assignedTo: userId });
+      if (hospital) {
+        const oldAssignedName = users.find(u => u.uid === hospital.assignedTo)?.name || 'Unassigned';
+        const newAssignedName = users.find(u => u.uid === userId)?.name || 'Unassigned';
+        await createAuditLog({
+          itemId: hospitalId,
+          itemName: hospital.name,
+          collectionName: 'hospitals',
+          action: 'bulk_assign',
+          currentUser,
+          oldData: { assignedTo: oldAssignedName },
+          newData: { assignedTo: newAssignedName }
+        });
+      }
     } catch (error) {
       console.error('Assignment failed:', error);
     }
@@ -364,20 +427,25 @@ export const HospitalList = memo(function HospitalList({ hospitals, users, inter
 
       {/* Bulk Action Bar */}
       {selectedIds.size > 0 && isAdmin && (
-        <div className="bg-stone-900 text-white p-4 rounded-2xl flex items-center justify-between shadow-lg animate-in slide-in-from-top-4 duration-300">
-          <div className="flex items-center gap-4">
+        <div className="bg-stone-900 text-white p-4 rounded-2xl flex items-center justify-between shadow-lg continental-layout animate-in slide-in-from-top-4 duration-300">
+          <div className="flex flex-col md:flex-row md:items-center gap-4 flex-1 mr-4">
             <span className="text-sm font-medium">{selectedIds.size} hospitals selected</span>
-            <div className="h-4 w-px bg-stone-700" />
-            <div className="flex items-center gap-2">
+            <div className="h-4 w-px bg-stone-700 hidden md:block" />
+            <div className="flex items-center gap-2 flex-wrap">
               <select
-                className="bg-stone-800 border-none rounded-lg text-xs text-white focus:ring-1 focus:ring-stone-600"
+                className="bg-stone-800 border-none rounded-lg text-xs text-white focus:ring-1 focus:ring-stone-600 focus:outline-none py-1.5 px-3"
                 value={bulkAssignUserId}
                 onChange={(e) => setBulkAssignUserId(e.target.value)}
               >
                 <option value="">Select Team Member...</option>
-                {users.map(u => (
-                  <option key={u.uid} value={u.uid}>{u.name}</option>
-                ))}
+                {users.map(u => {
+                  const uZone = getUserZoneName(u.uid);
+                  return (
+                    <option key={u.uid} value={u.uid}>
+                      {u.name} {uZone && uZone !== 'No Zone' ? `(${uZone})` : ''}
+                    </option>
+                  );
+                })}
               </select>
               <button 
                 onClick={handleBulkAssign}
@@ -388,6 +456,12 @@ export const HospitalList = memo(function HospitalList({ hospitals, users, inter
                 Assign Selected
               </button>
             </div>
+            {mismatchedCount > 0 && (
+              <span className="text-xs text-amber-400 font-medium animate-pulse flex items-center gap-1 bg-amber-500/10 border border-amber-500/20 px-2.5 py-1 rounded-lg">
+                <AlertTriangle className="w-3.5 h-3.5" />
+                {mismatchedCount} of selected cases do not match selected member's zone ({getUserZoneName(bulkAssignUserId)})!
+              </span>
+            )}
           </div>
           <button 
             onClick={() => setSelectedIds(new Set())}
@@ -775,20 +849,44 @@ export const HospitalList = memo(function HospitalList({ hospitals, users, inter
                   </td>
                   <td className="p-4">
                     {isAdmin ? (
-                      <select
-                        className="text-xs bg-stone-50 border-none rounded-lg focus:ring-1 focus:ring-stone-200"
-                        value={hospital.assignedTo || ''}
-                        onChange={(e) => assignHospital(hospital.id, e.target.value)}
-                      >
-                        <option value="">Unassigned</option>
-                        {users.map(u => (
-                          <option key={u.uid} value={u.uid}>{u.name}</option>
-                        ))}
-                      </select>
+                      <div className="space-y-1">
+                        <select
+                          className={cn(
+                            "text-xs bg-stone-50 border border-stone-200 rounded-lg focus:ring-1 focus:ring-stone-200 py-1 px-2.5 max-w-[150px] outline-none transition-all",
+                            hospital.assignedTo && !isUserCompatibleWithHospital(hospital.assignedTo, hospital.state) && "border-red-300 text-red-900 bg-red-50/50 focus:ring-red-200"
+                          )}
+                          value={hospital.assignedTo || ''}
+                          onChange={(e) => assignHospital(hospital.id, e.target.value)}
+                        >
+                          <option value="">Unassigned</option>
+                          {users.map(u => {
+                            const isComp = isUserCompatibleWithHospital(u.uid, hospital.state);
+                            const uZone = getUserZoneName(u.uid);
+                            return (
+                              <option key={u.uid} value={u.uid}>
+                                {u.name} {uZone && uZone !== 'No Zone' ? `(${uZone}${isComp ? '' : ' - MISMATCH'})` : ''}
+                              </option>
+                            );
+                          })}
+                        </select>
+                        {hospital.assignedTo && !isUserCompatibleWithHospital(hospital.assignedTo, hospital.state) && (
+                          <div className="text-[10px] text-red-600 font-bold flex items-center gap-1">
+                            <span className="inline-block w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
+                            <span>Mismatch ({getUserZoneName(hospital.assignedTo)})</span>
+                          </div>
+                        )}
+                      </div>
                     ) : (
-                      <span className="text-sm text-stone-500">
-                        {users.find(u => u.uid === hospital.assignedTo)?.name || 'Unassigned'}
-                      </span>
+                      <div className="space-y-1">
+                        <span className="text-sm text-stone-500">
+                          {users.find(u => u.uid === hospital.assignedTo)?.name || 'Unassigned'}
+                        </span>
+                        {hospital.assignedTo && !isUserCompatibleWithHospital(hospital.assignedTo, hospital.state) && (
+                          <div className="text-[10px] text-red-600 font-semibold flex items-center gap-1">
+                            <span>⚠️ Zone Mismatch ({getUserZoneName(hospital.assignedTo)})</span>
+                          </div>
+                        )}
+                      </div>
                     )}
                   </td>
                   <td className="p-4">
@@ -924,6 +1022,8 @@ export const HospitalList = memo(function HospitalList({ hospitals, users, inter
         <AddHospitalModal 
           users={users} 
           hospitals={hospitals}
+          zones={zones}
+          currentUser={currentUser}
           onClose={() => setIsAdding(false)} 
         />
       )}
@@ -932,12 +1032,16 @@ export const HospitalList = memo(function HospitalList({ hospitals, users, inter
           onClose={() => setIsBulkUploading(false)} 
           users={users}
           existingHospitals={hospitals}
+          zones={zones}
+          currentUser={currentUser}
         />
       )}
       {editingHospital && (
         <EditHospitalModal
           hospital={editingHospital}
           users={users}
+          zones={zones}
+          currentUser={currentUser}
           onClose={() => setEditingHospital(null)}
         />
       )}
@@ -1545,9 +1649,11 @@ function LogInteractionModal({ hospital, interactions, users, isAdmin, onClose }
   );
 }
 
-function EditHospitalModal({ hospital, users, onClose }: { 
+function EditHospitalModal({ hospital, users, zones, currentUser, onClose }: { 
   hospital: Hospital, 
   users: User[], 
+  zones: Zone[],
+  currentUser: User | null,
   onClose: () => void 
 }) {
   const [formData, setFormData] = useState({
@@ -1570,6 +1676,25 @@ function EditHospitalModal({ hospital, users, onClose }: {
     status: hospital.status
   });
 
+  const getUserZoneName = (userId: string) => {
+    const user = users.find(u => u.uid === userId);
+    if (!user || !user.zoneId) return 'No Zone';
+    const zone = zones?.find(z => z.id === user.zoneId);
+    return zone ? zone.name : 'Unknown';
+  };
+
+  const isUserCompatibleWithHospital = (userId: string, hospitalState: string) => {
+    if (!userId || !hospitalState) return true;
+    const user = users.find(u => u.uid === userId);
+    if (!user) return true;
+    if (!user.zoneId) return true;
+    const zone = zones?.find(z => z.id === user.zoneId);
+    if (!zone) return true;
+    return zone.states.some(s => s.toLowerCase().trim() === String(hospitalState).toLowerCase().trim());
+  };
+
+  const isCompatible = isUserCompatibleWithHospital(formData.assignedTo, formData.state);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
@@ -1583,6 +1708,15 @@ function EditHospitalModal({ hospital, users, onClose }: {
       }
       
       await updateDoc(doc(db, 'hospitals', hospital.id), dataToSave);
+      await createAuditLog({
+        itemId: hospital.id,
+        itemName: hospital.name,
+        collectionName: 'hospitals',
+        action: 'update',
+        currentUser,
+        oldData: hospital,
+        newData: dataToSave
+      });
       onClose();
     } catch (error) {
       console.error('Update failed:', error);
@@ -1634,15 +1768,30 @@ function EditHospitalModal({ hospital, users, onClose }: {
             <div>
               <label className="block text-xs font-bold text-stone-400 uppercase mb-1">Assigned To</label>
               <select
-                className="w-full p-3 bg-stone-50 border-none rounded-xl text-sm"
+                className={cn(
+                  "w-full p-3 bg-stone-50 border rounded-xl text-sm outline-none transition-all",
+                  formData.assignedTo && !isCompatible ? "border-red-300 text-red-900 bg-red-50/50" : "border-transparent"
+                )}
                 value={formData.assignedTo}
                 onChange={e => setFormData({...formData, assignedTo: e.target.value})}
               >
                 <option value="">Unassigned</option>
-                {users.map(u => (
-                  <option key={u.uid} value={u.uid}>{u.name}</option>
-                ))}
+                {users.map(u => {
+                  const isComp = isUserCompatibleWithHospital(u.uid, formData.state);
+                  const uZone = getUserZoneName(u.uid);
+                  return (
+                    <option key={u.uid} value={u.uid}>
+                      {u.name} {uZone && uZone !== 'No Zone' ? `(${uZone}${isComp ? '' : ' - MISMATCH'})` : ''}
+                    </option>
+                  );
+                })}
               </select>
+              {formData.assignedTo && !isCompatible && (
+                <p className="text-xs text-red-600 font-bold mt-1.5 flex items-center gap-1 bg-red-50 p-2 rounded-lg border border-red-100">
+                  <span className="inline-block w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
+                  Warning: {users.find(u => u.uid === formData.assignedTo)?.name} is assigned to the {getUserZoneName(formData.assignedTo)} zone, which does not cover the hospital state "{formData.state}".
+                </p>
+              )}
             </div>
             <div>
               <label className="block text-xs font-bold text-stone-400 uppercase mb-1">Contact Person</label>
@@ -1801,7 +1950,7 @@ function EditHospitalModal({ hospital, users, onClose }: {
   );
 }
 
-function AddHospitalModal({ users, hospitals, onClose }: { users: User[], hospitals: Hospital[], onClose: () => void }) {
+function AddHospitalModal({ users, hospitals, zones, currentUser, onClose }: { users: User[], hospitals: Hospital[], zones: Zone[], currentUser: User | null, onClose: () => void }) {
   const [formData, setFormData] = useState({
     name: '',
     state: '',
@@ -1821,6 +1970,25 @@ function AddHospitalModal({ users, hospitals, onClose }: { users: User[], hospit
     alternateNumber: '',
     designation: ''
   });
+
+  const getUserZoneName = (userId: string) => {
+    const user = users.find(u => u.uid === userId);
+    if (!user || !user.zoneId) return 'No Zone';
+    const zone = zones?.find(z => z.id === user.zoneId);
+    return zone ? zone.name : 'Unknown';
+  };
+
+  const isUserCompatibleWithHospital = (userId: string, hospitalState: string) => {
+    if (!userId || !hospitalState) return true;
+    const user = users.find(u => u.uid === userId);
+    if (!user) return true;
+    if (!user.zoneId) return true;
+    const zone = zones?.find(z => z.id === user.zoneId);
+    if (!zone) return true;
+    return zone.states.some(s => s.toLowerCase().trim() === String(hospitalState).toLowerCase().trim());
+  };
+
+  const isCompatible = isUserCompatibleWithHospital(formData.assignedTo, formData.state);
   const [error, setError] = useState<string | null>(null);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -1844,7 +2012,15 @@ function AddHospitalModal({ users, hospitals, onClose }: { users: User[], hospit
         dataToSave.renewalApplicationDate = new Date(dataToSave.renewalApplicationDate).toISOString();
       }
       
-      await addDoc(collection(db, 'hospitals'), dataToSave);
+      const docRef = await addDoc(collection(db, 'hospitals'), dataToSave);
+      await createAuditLog({
+        itemId: docRef.id,
+        itemName: formData.name,
+        collectionName: 'hospitals',
+        action: 'create',
+        currentUser,
+        newData: dataToSave
+      });
       onClose();
     } catch (error) {
       console.error('Add failed:', error);
@@ -1891,15 +2067,30 @@ function AddHospitalModal({ users, hospitals, onClose }: { users: User[], hospit
             <div>
               <label className="block text-xs font-bold text-stone-400 uppercase mb-1">Assigned To</label>
               <select
-                className="w-full p-3 bg-stone-50 border-none rounded-xl text-sm"
+                className={cn(
+                  "w-full p-3 bg-stone-50 border rounded-xl text-sm outline-none transition-all",
+                  formData.assignedTo && !isCompatible ? "border-red-300 text-red-900 bg-red-50/50" : "border-transparent"
+                )}
                 value={formData.assignedTo}
                 onChange={e => setFormData({...formData, assignedTo: e.target.value})}
               >
                 <option value="">Unassigned</option>
-                {users.map(u => (
-                  <option key={u.uid} value={u.uid}>{u.name}</option>
-                ))}
+                {users.map(u => {
+                  const isComp = isUserCompatibleWithHospital(u.uid, formData.state);
+                  const uZone = getUserZoneName(u.uid);
+                  return (
+                    <option key={u.uid} value={u.uid}>
+                      {u.name} {uZone && uZone !== 'No Zone' ? `(${uZone}${isComp ? '' : ' - MISMATCH'})` : ''}
+                    </option>
+                  );
+                })}
               </select>
+              {formData.assignedTo && !isCompatible && (
+                <p className="text-xs text-red-600 font-bold mt-1.5 flex items-center gap-1 bg-red-50 p-2 rounded-lg border border-red-100">
+                  <span className="inline-block w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
+                  Warning: {users.find(u => u.uid === formData.assignedTo)?.name} is assigned to the {getUserZoneName(formData.assignedTo)} zone, which does not cover the selected hospital state "{formData.state}".
+                </p>
+              )}
             </div>
             <div>
               <label className="block text-xs font-bold text-stone-400 uppercase mb-1">Contact Person</label>

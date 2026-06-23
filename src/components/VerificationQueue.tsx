@@ -1,19 +1,21 @@
 import React, { useState } from 'react';
-import { Interaction, Hospital, User } from '../types';
+import { Interaction, Hospital, User, Zone } from '../types';
 import { db } from '../firebase';
 import { doc, updateDoc, serverTimestamp } from 'firebase/firestore';
 import { CheckCircle2, XCircle, Clock, Hospital as HospitalIcon, User as UserIcon, Calendar, ClipboardCheck, Loader2 } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
 import { cn, normalizeDate } from '../lib/utils';
+import { createAuditLog } from '../lib/audit';
 
 interface VerificationQueueProps {
   interactions: Interaction[];
   hospitals: Hospital[];
   users: User[];
   currentUser: User;
+  zones: Zone[];
 }
 
-export function VerificationQueue({ interactions, hospitals, users, currentUser }: VerificationQueueProps) {
+export function VerificationQueue({ interactions, hospitals, users, currentUser, zones }: VerificationQueueProps) {
   const pendingVerifications = interactions.filter(i => i.verificationStatus === 'Pending');
 
   const hospitalMap = React.useMemo(() => new Map(hospitals.map(h => [h.id, h])), [hospitals]);
@@ -53,6 +55,7 @@ export function VerificationQueue({ interactions, hospitals, users, currentUser 
             caller={userMap.get(log.userId)} 
             users={users} 
             currentUser={currentUser} 
+            zones={zones}
           />
         ))}
       </div>
@@ -77,7 +80,7 @@ const REASONS = [
 ];
 
 function VerificationItem(props: any) {
-  const { interaction, hospital, caller, users, currentUser } = props;
+  const { interaction, hospital, caller, users, currentUser, zones } = props;
   const [loading, setLoading] = useState(false);
   const [rejecting, setRejecting] = useState(false);
   const [editingReason, setEditingReason] = useState(false);
@@ -104,6 +107,25 @@ function VerificationItem(props: any) {
     designation: hospital?.designation || '',
     status: hospital?.status || 'Active'
   });
+
+  const getUserZoneName = (userId: string) => {
+    const user = users.find(u => u.uid === userId);
+    if (!user || !user.zoneId) return 'No Zone';
+    const zone = zones?.find(z => z.id === user.zoneId);
+    return zone ? zone.name : 'Unknown';
+  };
+
+  const isUserCompatibleWithHospital = (userId: string, hospitalState: string) => {
+    if (!userId || !hospitalState) return true;
+    const user = users.find(u => u.uid === userId);
+    if (!user) return true;
+    if (!user.zoneId) return true;
+    const zone = zones?.find(z => z.id === user.zoneId);
+    if (!zone) return true;
+    return zone.states.some(s => s.toLowerCase().trim() === String(hospitalState).toLowerCase().trim());
+  };
+
+  const isCompatible = isUserCompatibleWithHospital(formData.assignedTo, formData.state);
   const [verificationRemarks, setVerificationRemarks] = useState('');
   const [showRejectForm, setShowRejectForm] = useState(false);
 
@@ -141,6 +163,16 @@ function VerificationItem(props: any) {
         reapplicationDate: formData.renewalApplicationDate
       });
 
+      await createAuditLog({
+        itemId: interaction.id,
+        itemName: hospital?.name || 'Interaction',
+        collectionName: 'interactions',
+        action: 'verify',
+        currentUser,
+        oldData: { verificationStatus: 'Pending' },
+        newData: { verificationStatus: status, verificationRemarks: verificationRemarks.trim() }
+      });
+
       // If verified, update the hospital record with the edited form data
       if (status === 'Verified') {
         const hospitalRef = doc(db, 'hospitals', interaction.hospitalId);
@@ -155,6 +187,15 @@ function VerificationItem(props: any) {
         }
 
         await updateDoc(hospitalRef, hospitalDataToSave);
+        await createAuditLog({
+          itemId: interaction.hospitalId,
+          itemName: hospital?.name || 'Hospital',
+          collectionName: 'hospitals',
+          action: 'update',
+          currentUser,
+          oldData: hospital,
+          newData: hospitalDataToSave
+        });
       }
 
       // No alert needed for success if we want a smoother experience, but let's keep one simple alert
@@ -283,15 +324,30 @@ function VerificationItem(props: any) {
             <div>
               <label className="block text-xs font-bold text-stone-400 uppercase mb-2">Assigned To</label>
               <select
-                className="w-full p-4 bg-stone-50 border border-stone-100 rounded-2xl text-sm focus:ring-2 focus:ring-amber-200 outline-none transition-all"
+                className={cn(
+                  "w-full p-4 bg-stone-50 border rounded-2xl text-sm focus:ring-2 outline-none transition-all",
+                  formData.assignedTo && !isCompatible ? "border-red-300 text-red-900 bg-red-50/50 focus:ring-red-200" : "border-stone-100 focus:ring-amber-200"
+                )}
                 value={formData.assignedTo}
                 onChange={e => setFormData({...formData, assignedTo: e.target.value})}
               >
                 <option value="">Unassigned</option>
-                {users.map(u => (
-                  <option key={u.uid} value={u.uid}>{u.name}</option>
-                ))}
+                {users.map(u => {
+                  const isComp = isUserCompatibleWithHospital(u.uid, formData.state);
+                  const uZone = getUserZoneName(u.uid);
+                  return (
+                    <option key={u.uid} value={u.uid}>
+                      {u.name} {uZone && uZone !== 'No Zone' ? `(${uZone}${isComp ? '' : ' - MISMATCH'})` : ''}
+                    </option>
+                  );
+                })}
               </select>
+              {formData.assignedTo && !isCompatible && (
+                <p className="text-xs text-red-600 font-bold mt-2 flex items-center gap-1.5 bg-red-50 p-3 rounded-2xl border border-red-100 shadow-sm">
+                  <span className="inline-block w-2 h-2 rounded-full bg-red-500 animate-pulse shrink-0" />
+                  Warning: {users.find(u => u.uid === formData.assignedTo)?.name} belongs to the {getUserZoneName(formData.assignedTo)} zone, which doesn't cover this case's state "{formData.state || '(Unknown)'}".
+                </p>
+              )}
             </div>
           </div>
 

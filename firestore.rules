@@ -40,6 +40,12 @@ service cloud.firestore {
       allow read, write: if isApproved();
     }
 
+    match /audit_logs/{logId} {
+      allow read: if isAdmin() || isApproved();
+      allow create: if isSignedIn();
+      allow update, delete: if isAdmin();
+    }
+
     match /interactions/{interactionId} {
       allow read, write: if isApproved();
     }
