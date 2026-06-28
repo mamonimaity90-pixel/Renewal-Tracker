@@ -30,6 +30,39 @@ export function TeamManagement({ users, zones }: TeamManagementProps) {
   const [selectedStates, setSelectedStates] = useState<string[]>([]);
   const [editingEmailId, setEditingEmailId] = useState<string | null>(null);
   const [editEmailValue, setEditEmailValue] = useState('');
+  const [editingZoneId, setEditingZoneId] = useState<string | null>(null);
+  const [selectedStateToAdd, setSelectedStateToAdd] = useState('');
+  const [customStateToAdd, setCustomStateToAdd] = useState('');
+
+  const handleAddStateToZone = async (zone: Zone) => {
+    const stateName = selectedStateToAdd || customStateToAdd.trim();
+    if (!stateName) return;
+    if (zone.states.some(s => s.toLowerCase() === stateName.toLowerCase())) {
+      alert("This state is already in the zone.");
+      return;
+    }
+    const updatedStates = [...zone.states, stateName];
+    try {
+      await updateDoc(doc(db, 'zones', zone.id), { states: updatedStates });
+      setSelectedStateToAdd('');
+      setCustomStateToAdd('');
+      setEditingZoneId(null);
+    } catch (error: any) {
+      console.error('Failed to add state to zone:', error);
+      alert(`Error adding state: ${error.message || 'Unknown error'}`);
+    }
+  };
+
+  const handleRemoveStateFromZone = async (zone: Zone, stateToRemove: string) => {
+    if (!window.confirm(`Are you sure you want to remove ${stateToRemove} from ${zone.name}?`)) return;
+    const updatedStates = zone.states.filter(s => s !== stateToRemove);
+    try {
+      await updateDoc(doc(db, 'zones', zone.id), { states: updatedStates });
+    } catch (error: any) {
+      console.error('Failed to remove state from zone:', error);
+      alert(`Error removing state: ${error.message || 'Unknown error'}`);
+    }
+  };
 
   const toggleRole = async (userId: string, currentRole: string) => {
     const newRole = currentRole === 'admin' ? 'team' : 'admin';
@@ -222,11 +255,87 @@ export function TeamManagement({ users, zones }: TeamManagementProps) {
                       <label className="text-[10px] font-bold text-stone-400 uppercase mb-2 block">Covering States</label>
                       <div className="flex flex-wrap gap-2">
                         {zone.states.map(state => (
-                          <span key={state} className="px-2.5 py-1 bg-stone-50 text-stone-600 rounded-lg text-[10px] font-medium border border-stone-100">
+                          <span key={state} className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-stone-50 text-stone-600 rounded-lg text-[10px] font-medium border border-stone-100">
                             {state}
+                            <button
+                              onClick={() => handleRemoveStateFromZone(zone, state)}
+                              className="p-0.5 rounded text-stone-300 hover:text-red-500 hover:bg-stone-200/50 transition-colors"
+                              title={`Remove ${state}`}
+                            >
+                              <X className="w-2.5 h-2.5" />
+                            </button>
                           </span>
                         ))}
+                        {zone.states.length === 0 && (
+                          <span className="text-[10px] text-stone-400 italic">No states configured for this zone</span>
+                        )}
                       </div>
+
+                      {/* Inline Add State Trigger / Form */}
+                      {editingZoneId === zone.id ? (
+                        <div className="mt-3 p-3 bg-stone-50 rounded-2xl border border-stone-200/60 space-y-2">
+                          <div>
+                            <label className="text-[9px] font-bold text-stone-400 uppercase block mb-1">Predefined States</label>
+                            <select
+                              value={selectedStateToAdd}
+                              onChange={(e) => {
+                                setSelectedStateToAdd(e.target.value);
+                                setCustomStateToAdd('');
+                              }}
+                              className="w-full bg-white border border-stone-200 rounded-xl p-2 text-xs font-medium focus:ring-2 focus:ring-stone-200"
+                            >
+                              <option value="">-- Select State --</option>
+                              {ALL_STATES.filter(s => !zone.states.includes(s)).map(s => (
+                                <option key={s} value={s}>{s}</option>
+                              ))}
+                            </select>
+                          </div>
+                          <div className="text-center text-[10px] text-stone-400 font-bold uppercase tracking-wider">— OR —</div>
+                          <div>
+                            <label className="text-[9px] font-bold text-stone-400 uppercase block mb-1">Custom State Name</label>
+                            <input
+                              type="text"
+                              placeholder="Type custom state name..."
+                              value={customStateToAdd}
+                              onChange={(e) => {
+                                setCustomStateToAdd(e.target.value);
+                                setSelectedStateToAdd('');
+                              }}
+                              className="w-full bg-white border border-stone-200 rounded-xl p-2 text-xs font-medium focus:ring-2 focus:ring-stone-200"
+                            />
+                          </div>
+                          <div className="flex gap-2 pt-1">
+                            <button
+                              onClick={() => handleAddStateToZone(zone)}
+                              disabled={!selectedStateToAdd && !customStateToAdd.trim()}
+                              className="flex-1 bg-stone-900 text-white py-2 rounded-xl text-xs font-bold hover:bg-stone-800 disabled:opacity-50 transition-colors"
+                            >
+                              Add
+                            </button>
+                            <button
+                              onClick={() => {
+                                setEditingZoneId(null);
+                                setSelectedStateToAdd('');
+                                setCustomStateToAdd('');
+                              }}
+                              className="px-3 bg-white border border-stone-200 text-stone-600 py-2 rounded-xl text-xs font-bold hover:bg-stone-100 transition-colors"
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <button
+                          onClick={() => {
+                            setEditingZoneId(zone.id);
+                            setSelectedStateToAdd('');
+                            setCustomStateToAdd('');
+                          }}
+                          className="mt-2.5 inline-flex items-center gap-1 text-[10px] text-blue-600 hover:text-blue-800 font-bold uppercase tracking-wider transition-colors"
+                        >
+                          <Plus className="w-3 h-3" /> Add State
+                        </button>
+                      )}
                     </div>
 
                     <div className="pt-4 border-t border-stone-50">

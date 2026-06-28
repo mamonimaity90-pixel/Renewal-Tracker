@@ -28,7 +28,7 @@ import { format, parseISO, isBefore, isAfter, startOfDay, differenceInDays } fro
 import Papa from 'papaparse';
 import { db, auth } from '../firebase';
 import { collection, addDoc, updateDoc, doc, writeBatch, serverTimestamp } from 'firebase/firestore';
-import { cn } from '../lib/utils';
+import { cn, areStatesCompatible } from '../lib/utils';
 import { BulkUpload } from './BulkUpload';
 import { createAuditLog } from '../lib/audit';
 
@@ -85,7 +85,7 @@ export const HospitalList = memo(function HospitalList({ hospitals, users, inter
     if (!user.zoneId) return true;
     const zone = zones?.find(z => z.id === user.zoneId);
     if (!zone) return true;
-    return zone.states.some(s => s.toLowerCase().trim() === String(hospitalState).toLowerCase().trim());
+    return zone.states.some(s => areStatesCompatible(s, hospitalState));
   };
 
   const mismatchedCount = useMemo(() => {
@@ -113,6 +113,7 @@ export const HospitalList = memo(function HospitalList({ hospitals, users, inter
   const [filterRenewalAppEnd, setFilterRenewalAppEnd] = useState('');
   const [filterFollowUp, setFilterFollowUp] = useState<'all' | 'today' | 'overdue' | 'upcoming'>('all');
   const [filterReason, setFilterReason] = useState<string>('all');
+  const [filterZone, setFilterZone] = useState<string>('all');
   const [activeHospitalId, setActiveHospitalId] = useState<string | null>(null);
 
   const availableStates = useMemo(() => Array.from(new Set(hospitals.map(h => h.state))).sort(), [hospitals]);
@@ -242,7 +243,17 @@ export const HospitalList = memo(function HospitalList({ hospitals, users, inter
           matchesFollowUp = false;
         }
 
-        return matchesSearch && matchesUser && matchesState && matchesBatch && matchesRenewal && matchesConnection && matchesReason && matchesDate && matchesRenewalAppDate && matchesEffort && matchesFollowUp;
+        let matchesZone = true;
+        if (filterZone !== 'all') {
+          const zoneObj = zones?.find(z => z.id === filterZone);
+          if (zoneObj) {
+            matchesZone = zoneObj.states.some(s => areStatesCompatible(s, h.state));
+          } else {
+            matchesZone = false;
+          }
+        }
+
+        return matchesSearch && matchesUser && matchesState && matchesBatch && matchesRenewal && matchesConnection && matchesReason && matchesDate && matchesRenewalAppDate && matchesEffort && matchesFollowUp && matchesZone;
       })
       .map(h => {
         const lastAtt = latestInteractionsMap.get(h.id);
@@ -266,7 +277,7 @@ export const HospitalList = memo(function HospitalList({ hospitals, users, inter
         if (valA > valB) return sortOrder === 'asc' ? 1 : -1;
         return 0;
       });
-  }, [hospitals, hospitalInteractionsMap, latestInteractionsMap, search, filterUsers, filterStates, filterRenewal, filterConnection, filterBatch, filterDateStart, filterDateEnd, filterRenewalAppStart, filterRenewalAppEnd, filterEffortLed, filterFollowUp, filterReason, sortField, sortOrder, effortLedHospitals]);
+  }, [hospitals, hospitalInteractionsMap, latestInteractionsMap, search, filterUsers, filterStates, filterRenewal, filterConnection, filterBatch, filterDateStart, filterDateEnd, filterRenewalAppStart, filterRenewalAppEnd, filterEffortLed, filterFollowUp, filterReason, filterZone, zones, sortField, sortOrder, effortLedHospitals]);
 
   const totalPages = Math.ceil(filteredHospitals.length / ITEMS_PER_PAGE);
   const paginatedHospitals = filteredHospitals.slice(
@@ -489,7 +500,7 @@ export const HospitalList = memo(function HospitalList({ hospitals, users, inter
             />
           </div>
           <div className="flex items-center gap-4">
-            {(search || filterUsers.length > 0 || filterStates.length > 0 || filterRenewal !== 'all' || filterConnection !== 'all' || filterReason !== 'all' || filterDateStart || filterDateEnd || filterRenewalAppStart || filterRenewalAppEnd) && (
+            {(search || filterUsers.length > 0 || filterStates.length > 0 || filterRenewal !== 'all' || filterConnection !== 'all' || filterReason !== 'all' || filterZone !== 'all' || filterDateStart || filterDateEnd || filterRenewalAppStart || filterRenewalAppEnd) && (
               <button 
                 onClick={() => {
                   setSearch('');
@@ -498,6 +509,7 @@ export const HospitalList = memo(function HospitalList({ hospitals, users, inter
                   setFilterRenewal('all');
                   setFilterConnection('all');
                   setFilterReason('all');
+                  setFilterZone('all');
                   setFilterEffortLed(false);
                   setFilterFollowUp('all');
                   setFilterDateStart('');
@@ -554,6 +566,22 @@ export const HospitalList = memo(function HospitalList({ hospitals, users, inter
               onChange={setFilterStates}
               placeholder="All States"
             />
+          </div>
+          <div>
+            <label className="block text-[10px] font-bold text-stone-400 uppercase mb-1">Zone</label>
+            <select
+              className="w-full p-2 bg-stone-50 border-none rounded-lg text-xs focus:ring-1 focus:ring-stone-200"
+              value={filterZone}
+              onChange={(e) => {
+                setFilterZone(e.target.value);
+                setCurrentPage(1);
+              }}
+            >
+              <option value="all">All Zones</option>
+              {zones?.map(z => (
+                <option key={z.id} value={z.id}>{z.name}</option>
+              ))}
+            </select>
           </div>
           <div>
             <label className="block text-[10px] font-bold text-stone-400 uppercase mb-1">Status</label>
@@ -939,6 +967,7 @@ export const HospitalList = memo(function HospitalList({ hospitals, users, inter
                   setFilterBatch('all');
                   setFilterUsers([]);
                   setFilterStates([]);
+                  setFilterZone('all');
                   setFilterDateStart('');
                   setFilterDateEnd('');
                   setFilterRenewalAppStart('');
@@ -1690,7 +1719,7 @@ function EditHospitalModal({ hospital, users, zones, currentUser, onClose }: {
     if (!user.zoneId) return true;
     const zone = zones?.find(z => z.id === user.zoneId);
     if (!zone) return true;
-    return zone.states.some(s => s.toLowerCase().trim() === String(hospitalState).toLowerCase().trim());
+    return zone.states.some(s => areStatesCompatible(s, hospitalState));
   };
 
   const isCompatible = isUserCompatibleWithHospital(formData.assignedTo, formData.state);
@@ -1985,7 +2014,7 @@ function AddHospitalModal({ users, hospitals, zones, currentUser, onClose }: { u
     if (!user.zoneId) return true;
     const zone = zones?.find(z => z.id === user.zoneId);
     if (!zone) return true;
-    return zone.states.some(s => s.toLowerCase().trim() === String(hospitalState).toLowerCase().trim());
+    return zone.states.some(s => areStatesCompatible(s, hospitalState));
   };
 
   const isCompatible = isUserCompatibleWithHospital(formData.assignedTo, formData.state);

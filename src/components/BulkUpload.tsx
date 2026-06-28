@@ -6,6 +6,7 @@ import { Upload, X, CheckCircle2, AlertCircle, Loader2 } from 'lucide-react';
 import { format, parse } from 'date-fns';
 import { Hospital, User, Zone } from '../types';
 import { createAuditLog } from '../lib/audit';
+import { areStatesCompatible } from '../lib/utils';
 
 interface BulkUploadProps {
   onClose: () => void;
@@ -202,7 +203,7 @@ export function BulkUpload({ onClose, users, existingHospitals, zones, currentUs
                 if (assignedUser && assignedUser.zoneId) {
                   const assignedUserZone = zones.find(z => z.id === assignedUser.zoneId);
                   const isCompatible = assignedUserZone?.states.some(
-                    s => s.toLowerCase().trim() === String(rowState).toLowerCase().trim()
+                    s => areStatesCompatible(s, String(rowState))
                   ) ?? false;
                   
                   if (!isCompatible) {

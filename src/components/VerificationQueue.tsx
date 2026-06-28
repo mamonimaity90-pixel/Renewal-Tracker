@@ -4,7 +4,7 @@ import { db } from '../firebase';
 import { doc, updateDoc, serverTimestamp } from 'firebase/firestore';
 import { CheckCircle2, XCircle, Clock, Hospital as HospitalIcon, User as UserIcon, Calendar, ClipboardCheck, Loader2 } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
-import { cn, normalizeDate } from '../lib/utils';
+import { cn, normalizeDate, areStatesCompatible } from '../lib/utils';
 import { createAuditLog } from '../lib/audit';
 
 interface VerificationQueueProps {
@@ -122,7 +122,7 @@ function VerificationItem(props: any) {
     if (!user.zoneId) return true;
     const zone = zones?.find(z => z.id === user.zoneId);
     if (!zone) return true;
-    return zone.states.some(s => s.toLowerCase().trim() === String(hospitalState).toLowerCase().trim());
+    return zone.states.some(s => areStatesCompatible(s, hospitalState));
   };
 
   const isCompatible = isUserCompatibleWithHospital(formData.assignedTo, formData.state);
