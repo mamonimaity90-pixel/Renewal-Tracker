@@ -500,7 +500,7 @@ export default function App() {
         />
       )}
       {activeTab === 'logs' && (
-        <ActivityLog hospitals={hospitals} interactions={interactions} users={users} currentUser={user} />
+        <ActivityLog hospitals={hospitals} interactions={interactions} users={users} currentUser={user} zones={zones} />
       )}
       {activeTab === 'audit' && user.role === 'admin' && (
         <AuditLogList users={users} currentUser={user} />

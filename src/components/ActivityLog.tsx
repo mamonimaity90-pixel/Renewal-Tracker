@@ -1,16 +1,17 @@
 import React, { useState, useMemo } from 'react';
-import { Hospital, Interaction, User } from '../types';
+import { Hospital, Interaction, User, Zone } from '../types';
 import { Phone, Mail, Users, Calendar, Search, Filter, Clock, ChevronRight, CheckCircle2, Edit2, Check, X, Loader2, AlertCircle } from 'lucide-react';
 import { format, parseISO, isWithinInterval, startOfDay, endOfDay, isBefore } from 'date-fns';
 import { db } from '../firebase';
 import { doc, updateDoc } from 'firebase/firestore';
-import { cn } from '../lib/utils';
+import { cn, areStatesCompatible } from '../lib/utils';
 
 interface ActivityLogProps {
   hospitals: Hospital[];
   interactions: Interaction[];
   users: User[];
   currentUser: User | null;
+  zones?: Zone[];
 }
 
 const REASONS = [
@@ -29,10 +30,11 @@ const REASONS = [
   'Others'
 ];
 
-export function ActivityLog({ hospitals, interactions, users, currentUser }: ActivityLogProps) {
+export function ActivityLog({ hospitals, interactions, users, currentUser, zones = [] }: ActivityLogProps) {
   const [filterType, setFilterType] = useState<string>('all');
   const [filterUser, setFilterUser] = useState<string>('all');
   const [filterReason, setFilterReason] = useState<string>('all');
+  const [filterZone, setFilterZone] = useState<string>('all');
   const [searchTerm, setSearchTerm] = useState('');
   const [dateStart, setDateStart] = useState('');
   const [dateEnd, setDateEnd] = useState('');
@@ -89,6 +91,16 @@ export function ActivityLog({ hospitals, interactions, users, currentUser }: Act
         const matchesUser = filterUser === 'all' || log.userId === filterUser;
         const matchesReason = filterReason === 'all' || log.reason === filterReason;
         
+        let matchesZone = true;
+        if (filterZone !== 'all') {
+          const zoneObj = zones.find(z => z.id === filterZone);
+          if (zoneObj && hospital) {
+            matchesZone = zoneObj.states.some(s => areStatesCompatible(s, hospital.state));
+          } else {
+            matchesZone = false;
+          }
+        }
+
         const matchesSearch = !searchTerm || 
           hospital?.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
           hospital?.id.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -105,10 +117,10 @@ export function ActivityLog({ hospitals, interactions, users, currentUser }: Act
           matchesDate = isWithinInterval(logDate, { start, end });
         }
 
-        return matchesType && matchesUser && matchesReason && matchesSearch && matchesDate;
+        return matchesType && matchesUser && matchesReason && matchesZone && matchesSearch && matchesDate;
       })
       .sort((a, b) => parseISO(b.timestamp).getTime() - parseISO(a.timestamp).getTime());
-  }, [interactions, hospitalMap, userMap, filterType, filterUser, filterReason, searchTerm, dateStart, dateEnd]);
+  }, [interactions, hospitalMap, userMap, filterType, filterUser, filterReason, filterZone, zones, searchTerm, dateStart, dateEnd]);
 
   return (
     <div className="space-y-6">
@@ -125,7 +137,7 @@ export function ActivityLog({ hospitals, interactions, users, currentUser }: Act
 
       {/* Filters */}
       <div className="bg-white p-6 rounded-3xl border border-stone-200 shadow-sm space-y-4">
-        <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7 gap-4">
           <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-stone-400" />
             <input
@@ -159,12 +171,17 @@ export function ActivityLog({ hospitals, interactions, users, currentUser }: Act
             ))}
           </select>
 
-          <input
-            type="date"
+          <select
             className="w-full p-2.5 bg-stone-50 border-none rounded-xl text-sm"
-            value={dateStart}
-            onChange={e => setDateStart(e.target.value)}
-          />
+            value={filterZone}
+            onChange={e => setFilterZone(e.target.value)}
+          >
+            <option value="all">All Zones</option>
+            {zones.map(z => (
+              <option key={z.id} value={z.id}>{z.name}</option>
+            ))}
+          </select>
+
           <select
             className="w-full p-2.5 bg-stone-50 border-none rounded-xl text-sm font-bold text-stone-700"
             value={filterReason}
@@ -175,6 +192,13 @@ export function ActivityLog({ hospitals, interactions, users, currentUser }: Act
               <option key={r} value={r}>{r}</option>
             ))}
           </select>
+
+          <input
+            type="date"
+            className="w-full p-2.5 bg-stone-50 border-none rounded-xl text-sm"
+            value={dateStart}
+            onChange={e => setDateStart(e.target.value)}
+          />
           <input
             type="date"
             className="w-full p-2.5 bg-stone-50 border-none rounded-xl text-sm"
