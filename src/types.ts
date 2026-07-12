@@ -39,12 +39,16 @@ export interface Hospital {
   renewalApplicationDate?: string; // ISO string
   assignedTo?: string; // User UID
   currentProgram?: string;
-  status: 'Active' | 'Expired' | 'Pending Renewal';
+  status: 'Active' | 'Expired' | 'Pending Renewal' | 'Draft';
   contactPerson?: string;
   contactNumber?: string;
   alternateNumber?: string;
   designation?: string;
   nextFollowUpDate?: string; // ISO string
+  isDraft?: boolean;
+  tempApplicationNo?: string;
+  tempApplicationDate?: string; // ISO string
+  draftFollowUpDate?: string; // ISO string
 }
 
 export interface Interaction {
@@ -76,6 +80,10 @@ export interface Interaction {
   reapplicationProgram?: string;
   reapplicationNumber?: string;
   reapplicationDate?: string;
+  isTemporary?: boolean;
+  tempApplicationNo?: string;
+  tempApplicationDate?: string;
+  draftFollowUpDate?: string;
   verificationStatus?: 'Pending' | 'Verified' | 'Rejected';
   verifiedBy?: string;
   verifiedAt?: string;

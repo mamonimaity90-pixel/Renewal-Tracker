@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { Hospital, Interaction, Zone, User, PerformanceStats } from '../types';
-import { parseISO, isBefore, isAfter, subMonths, startOfYear, endOfYear, format, startOfMonth, endOfMonth, isWithinInterval, startOfDay } from 'date-fns';
+import { parseISO, isBefore, isAfter, subMonths, startOfYear, endOfYear, format, startOfMonth, endOfMonth, isWithinInterval, startOfDay, endOfDay } from 'date-fns';
 import { Trophy, Target, AlertTriangle, TrendingUp, Users, Calendar, ChevronDown, Filter, Info, HelpCircle } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, PieChart, Pie } from 'recharts';
 
@@ -17,6 +17,8 @@ export function PerformanceDashboard({ hospitals, interactions, zones, users }: 
     end: endOfMonth(new Date()),
     label: 'This Month'
   });
+  const [customStart, setCustomStart] = useState<string>(format(startOfMonth(new Date()), 'yyyy-MM-dd'));
+  const [customEnd, setCustomEnd] = useState<string>(format(endOfMonth(new Date()), 'yyyy-MM-dd'));
   const [balancingStrategy, setBalancingStrategy] = useState<'portfolio' | 'opportunity' | 'raw'>('portfolio');
   const [showScoringGuide, setShowScoringGuide] = useState(true);
 
@@ -260,29 +262,81 @@ export function PerformanceDashboard({ hospitals, interactions, zones, users }: 
           <p className="text-stone-500">Regional zone performance based on retention targets.</p>
         </div>
         
-        <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 bg-white p-2 rounded-3xl border border-stone-200 shadow-sm">
-          <div className="flex items-center gap-2 px-3 py-2 text-stone-400 whitespace-nowrap">
-            <Filter className="w-4 h-4" />
-            <span className="text-[10px] font-bold uppercase tracking-widest">Competition Period</span>
-          </div>
-          <div className="flex bg-stone-50 p-1 rounded-2xl w-full sm:w-auto">
-            {quickRanges.map(range => (
+        <div className="flex flex-col items-stretch md:items-end gap-3">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 bg-white p-2 rounded-3xl border border-stone-200 shadow-sm">
+            <div className="flex items-center gap-2 px-3 py-2 text-stone-400 whitespace-nowrap">
+              <Filter className="w-4 h-4" />
+              <span className="text-[10px] font-bold uppercase tracking-widest">Competition Period</span>
+            </div>
+            <div className="flex bg-stone-50 p-1 rounded-2xl w-full sm:w-auto overflow-x-auto">
+              {quickRanges.map(range => (
+                <button
+                  key={range.label}
+                  onClick={() => setDateRange({ ...range })}
+                  className={`px-3 py-1.5 rounded-xl text-[10px] font-bold transition-all whitespace-nowrap ${dateRange.label === range.label ? 'bg-white shadow-sm text-stone-900' : 'text-stone-400 hover:text-stone-600'}`}
+                >
+                  {range.label}
+                </button>
+              ))}
               <button
-                key={range.label}
-                onClick={() => setDateRange({ ...range })}
-                className={`px-3 py-1.5 rounded-xl text-[10px] font-bold transition-all whitespace-nowrap ${dateRange.label === range.label ? 'bg-white shadow-sm text-stone-900' : 'text-stone-400 hover:text-stone-600'}`}
+                onClick={() => setDateRange({
+                  start: startOfDay(parseISO(customStart)),
+                  end: endOfDay(parseISO(customEnd)),
+                  label: 'Custom'
+                })}
+                className={`px-3 py-1.5 rounded-xl text-[10px] font-bold transition-all whitespace-nowrap ${dateRange.label === 'Custom' ? 'bg-white shadow-sm text-stone-900' : 'text-stone-400 hover:text-stone-600'}`}
               >
-                {range.label}
+                Custom Range
               </button>
-            ))}
+            </div>
+            <div className="hidden sm:block w-px h-6 bg-stone-100 mx-1" />
+            <div className="flex items-center gap-2 px-4 py-2 bg-stone-900 text-white rounded-2xl cursor-default">
+              <Calendar className="w-3.5 h-3.5" />
+              <span className="text-[10px] font-bold">
+                {format(dateRange.start, 'MMM d')} - {format(dateRange.end, 'MMM d, yyyy')}
+              </span>
+            </div>
           </div>
-          <div className="hidden sm:block w-px h-6 bg-stone-100 mx-1" />
-          <div className="flex items-center gap-2 px-4 py-2 bg-stone-900 text-white rounded-2xl cursor-default">
-            <Calendar className="w-3.5 h-3.5" />
-            <span className="text-[10px] font-bold">
-              {format(dateRange.start, 'MMM d')} - {format(dateRange.end, 'MMM d, yyyy')}
-            </span>
-          </div>
+
+          {/* Custom Date Inputs Panel */}
+          {dateRange.label === 'Custom' && (
+            <div className="flex flex-col sm:flex-row items-center gap-4 bg-white border border-stone-200 p-3 px-4 rounded-2xl shadow-sm self-start md:self-end animate-in fade-in slide-in-from-top-1 duration-250">
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] font-bold text-stone-400 uppercase tracking-wider">From:</span>
+                <input
+                  type="date"
+                  className="bg-stone-50 border border-stone-200 rounded-xl px-2.5 py-1 text-xs font-bold text-stone-700 focus:outline-none focus:ring-2 focus:ring-stone-200"
+                  value={customStart}
+                  onChange={(e) => {
+                    const newStart = e.target.value;
+                    setCustomStart(newStart);
+                    setDateRange({
+                      start: startOfDay(parseISO(newStart)),
+                      end: dateRange.end,
+                      label: 'Custom'
+                    });
+                  }}
+                />
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] font-bold text-stone-400 uppercase tracking-wider">To:</span>
+                <input
+                  type="date"
+                  className="bg-stone-50 border border-stone-200 rounded-xl px-2.5 py-1 text-xs font-bold text-stone-700 focus:outline-none focus:ring-2 focus:ring-stone-200"
+                  value={customEnd}
+                  onChange={(e) => {
+                    const newEnd = e.target.value;
+                    setCustomEnd(newEnd);
+                    setDateRange({
+                      start: dateRange.start,
+                      end: endOfDay(parseISO(newEnd)),
+                      label: 'Custom'
+                    });
+                  }}
+                />
+              </div>
+            </div>
+          )}
         </div>
       </header>
 

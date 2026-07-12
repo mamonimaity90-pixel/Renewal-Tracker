@@ -1,8 +1,10 @@
 import React, { useMemo, useState, memo } from 'react';
-import { Hospital, Interaction, Application, User } from '../types';
+import { Hospital, Interaction, Application, User, Zone } from '../types';
 import { 
-  BarChart, 
+  BarChart,
+  ComposedChart, 
   Bar, 
+  Line,
   XAxis, 
   YAxis, 
   CartesianGrid, 
@@ -16,7 +18,7 @@ import {
 } from 'recharts';
 import { FileText, AlertCircle, CheckCircle2, Clock, TrendingUp, Filter, Search, X, ArrowUpDown, ChevronDown, Users, UserCheck, PhoneOff, Ban, UserPlus } from 'lucide-react';
 import { format, isAfter, isBefore, parseISO, differenceInDays, differenceInMonths, startOfDay, endOfDay, isWithinInterval, subMonths } from 'date-fns';
-import { cn } from '../lib/utils';
+import { cn, areStatesCompatible } from '../lib/utils';
 import { generateHospitalReport } from '../lib/reportGenerator';
 
 interface DashboardProps {
@@ -26,9 +28,10 @@ interface DashboardProps {
   users: User[];
   setActiveTab?: (tab: any) => void;
   currentUser?: User | null;
+  zones?: Zone[];
 }
 
-export const Dashboard = memo(function Dashboard({ hospitals, interactions, applications, users, setActiveTab, currentUser }: DashboardProps) {
+export const Dashboard = memo(function Dashboard({ hospitals, interactions, applications, users, setActiveTab, currentUser, zones = [] }: DashboardProps) {
   const now = new Date();
   
   // Filter States
@@ -41,6 +44,7 @@ export const Dashboard = memo(function Dashboard({ hospitals, interactions, appl
   const [effortDateEnd, setEffortDateEnd] = useState(format(new Date(), 'yyyy-MM-dd'));
   const [trendGranularity, setTrendGranularity] = useState<'month' | 'year'>('month');
   const [trendView, setTrendView] = useState<'count' | 'percent'>('count');
+  const [trendZone, setTrendZone] = useState<string>('all');
   const [expandedStates, setExpandedStates] = useState<Set<string>>(new Set());
   const [stateSort, setStateSort] = useState<{ field: 'name' | 'total' | 'rate', order: 'asc' | 'desc' }>({ field: 'total', order: 'desc' });
   const [timelineProgram, setTimelineProgram] = useState<'all' | 'ELCP' | 'HCO' | 'SHCO' | 'ECO' | 'Other'>('all');
@@ -175,6 +179,8 @@ export const Dashboard = memo(function Dashboard({ hospitals, interactions, appl
       return hInteractions.length > 0 && !hInteractions.some(i => i.result === 'Connected' || i.result === 'Direct Update');
     }).length;
 
+    const draftCount = filteredHospitals.filter(h => h.status === 'Draft').length;
+
     return { 
       total, 
       expired: expiredByDateCount,
@@ -186,7 +192,8 @@ export const Dashboard = memo(function Dashboard({ hospitals, interactions, appl
       followUpsOverdue,
       followUpsToday,
       neverCalled: neverCalledCount,
-      neverEverConnected: neverEverConnectedCount
+      neverEverConnected: neverEverConnectedCount,
+      draft: draftCount
     };
   }, [filteredHospitals, hospitalInteractionsMap, now]);
 
@@ -318,6 +325,18 @@ export const Dashboard = memo(function Dashboard({ hospitals, interactions, appl
   }, [currentUser, hospitals, interactions, hospitalInteractionsMap]);
 
   const trendData = useMemo(() => {
+    let trendHospitals = filteredHospitals;
+    if (trendZone !== 'all') {
+      const selectedZone = zones?.find(z => z.id === trendZone);
+      if (selectedZone) {
+        trendHospitals = filteredHospitals.filter(h => 
+          selectedZone.states.some(s => areStatesCompatible(s, h.state))
+        );
+      } else {
+        trendHospitals = [];
+      }
+    }
+
     const timeLabels = [];
     if (trendGranularity === 'month') {
       for (let i = 11; i >= 0; i--) {
@@ -334,7 +353,7 @@ export const Dashboard = memo(function Dashboard({ hospitals, interactions, appl
     }
 
     return timeLabels.map(label => {
-      const monthHospitals = filteredHospitals.filter(h => {
+      const monthHospitals = trendHospitals.filter(h => {
         const expiry = parseISO(h.expiryDate);
         return trendGranularity === 'month' 
           ? format(expiry, 'MMM yyyy') === label
@@ -389,6 +408,8 @@ export const Dashboard = memo(function Dashboard({ hospitals, interactions, appl
         'Post-1-2Y': counts.post1to2y,
         'Pending': counts.pending,
         total: total,
+        chartTotal: total === 0 ? 0 : (trendView === 'percent' ? 100 : total),
+        dummyTotal: 0,
         renewedPercent: total > 0 ? Math.round((renewedCount / total) * 100) : 0,
         pendingPercent: total > 0 ? Math.round((counts.pending / total) * 100) : 0
       };
@@ -404,7 +425,7 @@ export const Dashboard = memo(function Dashboard({ hospitals, interactions, appl
 
       return dataPoint;
     });
-  }, [filteredHospitals, trendGranularity, trendView]);
+  }, [filteredHospitals, trendGranularity, trendView, trendZone, zones]);
 
   const renewalData = useMemo(() => [
     { name: 'Renewed', value: filteredHospitals.filter(h => h.reapplied).length },
@@ -732,13 +753,14 @@ export const Dashboard = memo(function Dashboard({ hospitals, interactions, appl
       </div>
 
       {/* Quick Stats */}
-      <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-6">
         {[
           { label: filterUser || filterState || filterBatch !== 'all' || filterDateStart || filterDateEnd ? 'Filtered Leads' : 'Total Dataset', value: stats.total, icon: TrendingUp, color: 'text-stone-600', sub: 'Entire Cohort' },
           { label: 'Expired', value: stats.expired, icon: Ban, color: 'text-red-500', sub: 'Expiry date passed' },
           { label: 'Due for Expiry', value: stats.dueForExpiry, icon: Clock, color: 'text-amber-500', sub: 'Upcoming Expiries' },
           { label: 'Renewed', value: stats.renewed, icon: CheckCircle2, color: 'text-emerald-500', sub: 'Compliance Secured' },
           { label: 'Pending', value: stats.pendingRenewals, icon: FileText, color: 'text-blue-500', sub: 'Actionable Leads' },
+          { label: 'Draft', value: stats.draft, icon: FileText, color: 'text-indigo-500', sub: 'In Progress (Portal)' },
         ].map((stat, i) => (
           <div key={i} className="bg-white p-6 rounded-3xl border border-stone-200 shadow-sm transition-all hover:shadow-md">
             <div className="flex items-center justify-between mb-4">
@@ -1065,6 +1087,19 @@ export const Dashboard = memo(function Dashboard({ hospitals, interactions, appl
           </div>
           
           <div className="flex flex-wrap items-center gap-3">
+            {zones && zones.length > 0 && (
+              <select
+                className="p-2 bg-stone-100 border-none rounded-xl text-[10px] font-bold text-stone-700 focus:ring-2 focus:ring-stone-200"
+                value={trendZone}
+                onChange={(e) => setTrendZone(e.target.value)}
+              >
+                <option value="all">All Zones</option>
+                {zones.map(z => (
+                  <option key={z.id} value={z.id}>{z.name}</option>
+                ))}
+              </select>
+            )}
+
             <div className="flex bg-stone-100 p-1 rounded-xl">
               <button 
                 onClick={() => setTrendGranularity('month')}
@@ -1130,7 +1165,7 @@ export const Dashboard = memo(function Dashboard({ hospitals, interactions, appl
 
         <div className="h-96">
           <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={trendData} margin={{ top: 20, right: 10, left: -20, bottom: 0 }}>
+            <ComposedChart data={trendData} margin={{ top: 45, right: 10, left: -20, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f5f5f4" />
               <XAxis 
                 dataKey="label" 
@@ -1145,6 +1180,7 @@ export const Dashboard = memo(function Dashboard({ hospitals, interactions, appl
                 tickLine={false} 
                 fontSize={10} 
                 tick={{ fill: '#78716c' }}
+                domain={trendView === 'percent' ? [0, 125] : [0, (max: number) => Math.ceil(max * 1.25) + 3]}
                 label={trendView === 'percent' ? { value: '%', angle: -90, position: 'insideLeft', offset: 10, fontSize: 10 } : undefined}
               />
               <Tooltip 
@@ -1156,7 +1192,7 @@ export const Dashboard = memo(function Dashboard({ hospitals, interactions, appl
                   fontSize: '12px'
                 }}
                 formatter={(value: any, name: string) => {
-                  if (name === 'total') return null;
+                  if (name === 'total' || name === 'dummyTotal' || name === 'chartTotal') return null;
                   return trendView === 'percent' ? `${value}%` : value;
                 }}
               />
@@ -1177,30 +1213,45 @@ export const Dashboard = memo(function Dashboard({ hospitals, interactions, appl
               </Bar>
               <Bar dataKey="Pending" stackId="a" fill="#d6d3d1" radius={[4, 4, 0, 0]} barSize={40}>
                 <LabelList dataKey="Pending" content={(props: any) => renderStackLabel(props)} />
+              </Bar>
+              <Line 
+                type="monotone" 
+                dataKey="chartTotal" 
+                stroke="transparent" 
+                dot={false} 
+                activeDot={false} 
+                legendType="none"
+              >
                 <LabelList 
-                  dataKey="total" 
-                  position="top" 
-                  offset={10}
+                  dataKey="chartTotal" 
                   content={(props: any) => {
-                    const { x, y, width, value, payload } = props;
-                    if (!value || !payload) return null;
+                    const { x, y, index } = props;
+                    const dataPoint = trendData[index];
+                    if (!dataPoint || dataPoint.total === 0) return null;
                     return (
                       <g>
-                        <text x={x + width / 2} y={y - 25} fill="#1c1917" textAnchor="middle" fontSize={10} fontWeight="bold">
-                          {payload.renewedPercent ?? 0}% Ren.
+                        {trendView === 'count' && (
+                          <text x={x} y={y - 35} fill="#1c1917" textAnchor="middle" fontSize={11} fontWeight="black">
+                            Total: {dataPoint.total}
+                          </text>
+                        )}
+                        <text x={x} y={y - 23} fill="#10b981" textAnchor="middle" fontSize={10} fontWeight="bold">
+                          {dataPoint.renewedPercent ?? 0}% Ren.
                         </text>
-                        <text x={x + width / 2} y={y - 12} fill="#ef4444" textAnchor="middle" fontSize={10} fontWeight="bold">
-                          {payload.pendingPercent ?? 0}% Pend.
+                        <text x={x} y={y - 10} fill="#ef4444" textAnchor="middle" fontSize={10} fontWeight="bold">
+                          {dataPoint.pendingPercent ?? 0}% Pend.
                         </text>
-                        <text x={x + width / 2} y={y + 12} fill="#78716c" textAnchor="middle" fontSize={9}>
-                          (n={value})
-                        </text>
+                        {trendView !== 'count' && (
+                          <text x={x} y={y + 12} fill="#78716c" textAnchor="middle" fontSize={9}>
+                            (n={dataPoint.total})
+                          </text>
+                        )}
                       </g>
                     );
                   }} 
                 />
-              </Bar>
-            </BarChart>
+              </Line>
+            </ComposedChart>
           </ResponsiveContainer>
         </div>
       </div>

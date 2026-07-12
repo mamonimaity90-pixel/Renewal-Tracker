@@ -8,9 +8,10 @@ import {
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword
 } from 'firebase/auth';
-import { doc, getDoc, setDoc, onSnapshot, collection, query, orderBy, limit } from 'firebase/firestore';
+import { doc, getDoc, setDoc, onSnapshot, collection, query, orderBy, limit, updateDoc } from 'firebase/firestore';
 import { Hospital, User, Interaction, Application, Zone } from './types';
 import { normalizeDate } from './lib/utils';
+import { createAuditLog } from './lib/audit';
 import { Layout } from './components/Layout';
 import { Dashboard } from './components/Dashboard';
 import { HospitalList } from './components/HospitalList';
@@ -109,6 +110,59 @@ export default function App() {
     };
   }, []);
 
+  // Automatically check and revert draft hospitals that have not paid/renewed within 30 days of temporary application
+  useEffect(() => {
+    if (!user || hospitals.length === 0) return;
+    
+    const checkDraftExpirations = async () => {
+      const now = new Date();
+      for (const hospital of hospitals) {
+        if (hospital.status === 'Draft' && hospital.tempApplicationDate) {
+          try {
+            const appDate = new Date(hospital.tempApplicationDate);
+            if (!isNaN(appDate.getTime())) {
+              const diffTime = now.getTime() - appDate.getTime();
+              const diffDays = diffTime / (1000 * 60 * 60 * 24);
+              if (diffDays > 30) {
+                console.log(`Auto-reverting expired draft hospital: ${hospital.name} (applied ${diffDays.toFixed(1)} days ago)`);
+                await updateDoc(doc(db, 'hospitals', hospital.id), {
+                  status: 'Pending Renewal',
+                  tempApplicationNo: '',
+                  tempApplicationDate: '',
+                  draftFollowUpDate: '',
+                  isDraft: false,
+                  reapplied: false,
+                  lastInteractionDate: new Date().toISOString()
+                });
+
+                await createAuditLog({
+                  itemId: hospital.id,
+                  itemName: hospital.name,
+                  collectionName: 'hospitals',
+                  action: 'update',
+                  currentUser: { uid: 'system', name: 'System Auto-Revert', role: 'admin', email: 'system@renewals.com', status: 'approved' },
+                  oldData: hospital,
+                  newData: {
+                    status: 'Pending Renewal',
+                    tempApplicationNo: '',
+                    tempApplicationDate: '',
+                    draftFollowUpDate: '',
+                    isDraft: false,
+                    reapplied: false
+                  }
+                });
+              }
+            }
+          } catch (err) {
+            console.error(`Error auto-reverting expired draft hospital ${hospital.name}:`, err);
+          }
+        }
+      }
+    };
+
+    checkDraftExpirations();
+  }, [hospitals, user]);
+
   useEffect(() => {
     if (!user) {
       setHospitals([]);
@@ -203,6 +257,56 @@ export default function App() {
       unsubZones();
     };
   }, [user]);
+
+  // Auto-revert draft hospitals if 30 days have passed since tempApplicationDate
+  useEffect(() => {
+    if (!user || hospitals.length === 0) return;
+
+    const now = new Date();
+    const expiredDrafts = hospitals.filter(h => {
+      if (h.status !== 'Draft' || !h.tempApplicationDate) return false;
+      try {
+        const appDate = new Date(h.tempApplicationDate);
+        const diffTime = now.getTime() - appDate.getTime();
+        const diffDays = diffTime / (1000 * 60 * 60 * 24);
+        return diffDays >= 30;
+      } catch (err) {
+        return false;
+      }
+    });
+
+    if (expiredDrafts.length > 0) {
+      const revertDrafts = async () => {
+        for (const h of expiredDrafts) {
+          try {
+            const expiryDateObj = new Date(h.expiryDate);
+            const isExpired = expiryDateObj < now;
+            const revertedStatus = isExpired ? 'Expired' : 'Pending Renewal';
+
+            await updateDoc(doc(db, 'hospitals', h.id), {
+              status: revertedStatus
+            });
+
+            await createAuditLog({
+              itemId: h.id,
+              itemName: h.name,
+              collectionName: 'hospitals',
+              action: 'update',
+              currentUser: user,
+              oldData: { status: 'Draft' },
+              newData: { status: revertedStatus }
+            });
+
+            console.log(`Auto-reverted draft hospital ${h.name} back to ${revertedStatus} as 30 days passed since ${h.tempApplicationDate}`);
+          } catch (err) {
+            console.error(`Failed to auto-revert draft hospital ${h.name}:`, err);
+          }
+        }
+      };
+
+      revertDrafts();
+    }
+  }, [hospitals, user]);
 
   const handleLogin = async () => {
     if (isLoggingIn) return;
@@ -467,6 +571,7 @@ export default function App() {
           users={users}
           setActiveTab={setActiveTab}
           currentUser={user}
+          zones={zones}
         />
       )}
       {activeTab === 'performance' && (

@@ -179,7 +179,10 @@ function VerificationItem(props: any) {
         const hospitalDataToSave: any = { 
           ...formData, 
           applicationNo: formData.applicationNo.trim(),
-          status: 'Active' 
+          status: 'Active',
+          tempApplicationNo: '',
+          tempApplicationDate: '',
+          draftFollowUpDate: ''
         };
 
         if (hospitalDataToSave.renewalApplicationDate) {

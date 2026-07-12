@@ -184,8 +184,9 @@ export const HospitalList = memo(function HospitalList({ hospitals, users, inter
 
         const matchesRenewal = 
           filterRenewal === 'all' || 
-          (filterRenewal === 'renewed' && h.reapplied) || 
-          (filterRenewal === 'pending' && !h.reapplied);
+          (filterRenewal === 'renewed' && h.reapplied && h.status !== 'Draft') || 
+          (filterRenewal === 'pending' && !h.reapplied && h.status !== 'Draft') ||
+          (filterRenewal === 'draft' && h.status === 'Draft');
 
         let matchesConnection = true;
         if (filterConnection !== 'all') {
@@ -593,6 +594,7 @@ export const HospitalList = memo(function HospitalList({ hospitals, users, inter
               <option value="all">All Renewal Status</option>
               <option value="renewed">Renewed</option>
               <option value="pending">Pending</option>
+              <option value="draft">Draft</option>
             </select>
           </div>
           <div>
@@ -782,9 +784,22 @@ export const HospitalList = memo(function HospitalList({ hospitals, users, inter
                       className="text-left group/name"
                     >
                       <p className="font-semibold text-stone-900 group-hover/name:text-blue-600 transition-colors">{hospital.name}</p>
-                      <p className="text-[10px] text-stone-400 flex items-center gap-1">
-                        <Plus className="w-2.5 h-2.5" /> Log Interaction
-                      </p>
+                      {hospital.status === 'Draft' ? (
+                        <div className="mt-1 flex flex-col gap-0.5 bg-indigo-50 border border-indigo-100 p-1.5 rounded-lg text-[9px] text-indigo-900 max-w-[190px]">
+                          <span className="font-bold flex items-center gap-1">
+                            <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-pulse inline-block" />
+                            Draft: {hospital.tempApplicationNo || 'N/A'}
+                          </span>
+                          <span>App Date: {hospital.tempApplicationDate ? format(parseISO(hospital.tempApplicationDate), 'MMM d, yyyy') : 'N/A'}</span>
+                          {hospital.draftFollowUpDate && (
+                            <span className="font-bold text-indigo-700">Follow-up: {format(parseISO(hospital.draftFollowUpDate), 'MMM d, yyyy')}</span>
+                          )}
+                        </div>
+                      ) : (
+                        <p className="text-[10px] text-stone-400 flex items-center gap-1">
+                          <Plus className="w-2.5 h-2.5" /> Log Interaction
+                        </p>
+                      )}
                     </button>
                   </td>
                   <td className="p-4">
@@ -922,16 +937,17 @@ export const HospitalList = memo(function HospitalList({ hospitals, users, inter
                       const expiryDate = parseISO(hospital.expiryDate);
                       const dayNow = startOfDay(new Date());
                       const isExpired = isBefore(expiryDate, dayNow);
-                      const isDueSoon = !hospital.reapplied && !isExpired;
+                      const isDraft = hospital.status === 'Draft';
 
                       return (
                         <span className={cn(
                           "px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider",
+                          isDraft ? "bg-indigo-100 text-indigo-700 border border-indigo-200" :
                           hospital.reapplied ? "bg-emerald-100 text-emerald-700" :
                           isExpired ? "bg-red-100 text-red-700" :
                           "bg-amber-100 text-amber-700"
                         )}>
-                          {hospital.reapplied ? 'Renewed' : isExpired ? 'Expired' : 'Due for Expiry'}
+                          {isDraft ? 'Draft' : hospital.reapplied ? 'Renewed' : isExpired ? 'Expired' : 'Due for Expiry'}
                         </span>
                       );
                     })()}
@@ -1182,9 +1198,13 @@ function LogInteractionModal({ hospital, interactions, users, isAdmin, onClose }
   const [isUpdatingHistory, setIsUpdatingHistory] = useState(false);
   const [reapplicationData, setReapplicationData] = useState({
     reapplied: false,
+    isTemporary: false,
     reapplicationProgram: '',
     reapplicationNumber: '',
-    reapplicationDate: ''
+    reapplicationDate: '',
+    tempApplicationNo: '',
+    tempApplicationDate: '',
+    draftFollowUpDate: ''
   });
 
   // Handle Manual Update logic
@@ -1195,7 +1215,7 @@ function LogInteractionModal({ hospital, interactions, users, isAdmin, onClose }
         result: 'Direct Update', 
         reason: 'Already applied for renewal' 
       }));
-      setReapplicationData(prev => ({ ...prev, reapplied: true }));
+      setReapplicationData(prev => ({ ...prev, reapplied: true, isTemporary: false }));
     } else if (formData.result === 'Direct Update') {
       setFormData(prev => ({ ...prev, result: 'Connected' }));
     }
@@ -1236,11 +1256,48 @@ function LogInteractionModal({ hospital, interactions, users, isAdmin, onClose }
       };
 
       if (needsReapplicationDetails) {
-        dataToSave.reapplied = reapplicationData.reapplied;
-        dataToSave.reapplicationProgram = reapplicationData.reapplicationProgram;
-        dataToSave.reapplicationNumber = reapplicationData.reapplicationNumber;
-        dataToSave.reapplicationDate = reapplicationData.reapplicationDate;
-        dataToSave.verificationStatus = 'Pending';
+        if (reapplicationData.isTemporary) {
+          if (!reapplicationData.tempApplicationNo || !reapplicationData.reapplicationProgram || !reapplicationData.tempApplicationDate || !reapplicationData.draftFollowUpDate) {
+            alert("Please fill in all temporary application details.");
+            setLoading(false);
+            return;
+          }
+          const appDate = new Date(reapplicationData.tempApplicationDate);
+          const fDate = new Date(reapplicationData.draftFollowUpDate);
+          const maxFDate = new Date(appDate);
+          maxFDate.setDate(maxFDate.getDate() + 30);
+          
+          if (fDate > maxFDate) {
+            alert("The draft follow-up date cannot be beyond 30 days from the temporary application date.");
+            setLoading(false);
+            return;
+          }
+          if (fDate < appDate) {
+            alert("The draft follow-up date cannot be before the temporary application date.");
+            setLoading(false);
+            return;
+          }
+
+          dataToSave.isTemporary = true;
+          dataToSave.reapplied = false;
+          dataToSave.reapplicationProgram = reapplicationData.reapplicationProgram;
+          dataToSave.tempApplicationNo = reapplicationData.tempApplicationNo;
+          dataToSave.tempApplicationDate = reapplicationData.tempApplicationDate;
+          dataToSave.draftFollowUpDate = reapplicationData.draftFollowUpDate;
+          dataToSave.verificationStatus = 'Verified'; // Auto-verified for Draft status
+        } else {
+          if (!reapplicationData.reapplicationProgram || !reapplicationData.reapplicationNumber || !reapplicationData.reapplicationDate) {
+            alert("Please fill in all renewal application details.");
+            setLoading(false);
+            return;
+          }
+          dataToSave.isTemporary = false;
+          dataToSave.reapplied = reapplicationData.reapplied;
+          dataToSave.reapplicationProgram = reapplicationData.reapplicationProgram;
+          dataToSave.reapplicationNumber = reapplicationData.reapplicationNumber;
+          dataToSave.reapplicationDate = reapplicationData.reapplicationDate;
+          dataToSave.verificationStatus = 'Pending';
+        }
       }
 
       if (formData.result !== 'Connected' && formData.result !== 'Direct Update') {
@@ -1251,8 +1308,26 @@ function LogInteractionModal({ hospital, interactions, users, isAdmin, onClose }
       
       await addDoc(collection(db, 'interactions'), dataToSave);
 
-      // Update hospital's next follow up date safely
-      if (formData.followUpDate && formData.followUpDate.trim() !== '') {
+      // If temporary, update the hospital document directly
+      if (needsReapplicationDetails && reapplicationData.isTemporary) {
+        try {
+          await updateDoc(doc(db, 'hospitals', hospital.id), {
+            status: 'Draft',
+            tempApplicationNo: reapplicationData.tempApplicationNo,
+            tempApplicationDate: new Date(reapplicationData.tempApplicationDate).toISOString(),
+            draftFollowUpDate: new Date(reapplicationData.draftFollowUpDate).toISOString(),
+            nextFollowUpDate: new Date(reapplicationData.draftFollowUpDate).toISOString(),
+            reapplied: false,
+            reappliedProgram: reapplicationData.reapplicationProgram,
+            renewalApplicationNo: '',
+            renewalApplicationDate: '',
+            lastInteractionDate: new Date().toISOString()
+          });
+        } catch (updateErr) {
+          console.error('Failed to update hospital to Draft:', updateErr);
+        }
+      } else if (formData.followUpDate && formData.followUpDate.trim() !== '') {
+        // Update hospital's next follow up date safely
         try {
           const followUpDate = new Date(formData.followUpDate);
           if (!isNaN(followUpDate.getTime())) {
@@ -1566,59 +1641,163 @@ function LogInteractionModal({ hospital, interactions, users, isAdmin, onClose }
                   )}
 
                   {needsReapplicationDetails && (
-                    <div className="p-4 bg-amber-50 rounded-2xl border border-amber-100 space-y-4 animate-in zoom-in-95 duration-200">
-                      <div className="flex items-center gap-2">
-                        <input
-                          type="checkbox"
-                          id="modal-reapplied"
-                          className="w-4 h-4 rounded border-stone-300 text-stone-900 focus:ring-stone-900"
-                          checked={reapplicationData.reapplied}
-                          onChange={e => setReapplicationData({...reapplicationData, reapplied: e.target.checked})}
-                        />
-                        <label htmlFor="modal-reapplied" className="text-xs font-bold text-stone-700 uppercase">Reapplied for renewal?</label>
+                    <div className="p-4 bg-amber-50/50 rounded-2xl border border-amber-200 space-y-4 animate-in zoom-in-95 duration-200">
+                      <div>
+                        <label className="block text-[10px] font-bold text-stone-500 uppercase mb-2 tracking-wider">Application Type</label>
+                        <div className="flex gap-4 p-1 bg-stone-100 rounded-xl border border-stone-200">
+                          <button
+                            type="button"
+                            onClick={() => setReapplicationData(prev => ({ ...prev, isTemporary: true, reapplied: false }))}
+                            className={cn(
+                              "flex-1 py-2 text-xs font-bold rounded-lg transition-all",
+                              reapplicationData.isTemporary 
+                                ? "bg-indigo-600 text-white shadow-sm" 
+                                : "text-stone-600 hover:text-stone-900"
+                            )}
+                          >
+                            Temporary (Draft)
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setReapplicationData(prev => ({ ...prev, isTemporary: false, reapplied: true }))}
+                            className={cn(
+                              "flex-1 py-2 text-xs font-bold rounded-lg transition-all",
+                              !reapplicationData.isTemporary 
+                                ? "bg-stone-900 text-white shadow-sm" 
+                                : "text-stone-600 hover:text-stone-900"
+                            )}
+                          >
+                            Permanent (Final)
+                          </button>
+                        </div>
                       </div>
 
-                      <div className="grid grid-cols-2 gap-4">
-                        <div>
-                          <label className="block text-[10px] font-bold text-amber-900 uppercase mb-1">Reapplication Program</label>
-                          <select
-                            required={needsReapplicationDetails}
-                            className="w-full p-2.5 bg-white border border-amber-200 rounded-xl text-sm"
-                            value={reapplicationData.reapplicationProgram}
-                            onChange={e => setReapplicationData({...reapplicationData, reapplicationProgram: e.target.value})}
-                          >
-                            <option value="">Select Program</option>
-                            <option value="HCO">HCO</option>
-                            <option value="SHCO">SHCO</option>
-                            <option value="ECO">ECO</option>
-                            <option value="ELCP">ELCP</option>
-                          </select>
+                      {reapplicationData.isTemporary ? (
+                        <div className="space-y-4 pt-2">
+                          <p className="text-xs font-bold text-indigo-900 uppercase">Temporary Application Details (Draft/Portal)</p>
+                          <div className="grid grid-cols-2 gap-4">
+                            <div>
+                              <label className="block text-[10px] font-bold text-indigo-900 uppercase mb-1">Temp Application No</label>
+                              <input
+                                type="text"
+                                required={needsReapplicationDetails && reapplicationData.isTemporary}
+                                placeholder="e.g. TEMP-12345"
+                                className="w-full p-2.5 bg-white border border-indigo-200 rounded-xl text-sm"
+                                value={reapplicationData.tempApplicationNo}
+                                onChange={e => setReapplicationData({...reapplicationData, tempApplicationNo: e.target.value})}
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-[10px] font-bold text-indigo-900 uppercase mb-1">Program Name</label>
+                              <select
+                                required={needsReapplicationDetails && reapplicationData.isTemporary}
+                                className="w-full p-2.5 bg-white border border-indigo-200 rounded-xl text-sm"
+                                value={reapplicationData.reapplicationProgram}
+                                onChange={e => setReapplicationData({...reapplicationData, reapplicationProgram: e.target.value})}
+                              >
+                                <option value="">Select Program</option>
+                                <option value="HCO">HCO</option>
+                                <option value="SHCO">SHCO</option>
+                                <option value="ECO">ECO</option>
+                                <option value="ELCP">ELCP</option>
+                              </select>
+                            </div>
+                            <div>
+                              <label className="block text-[10px] font-bold text-indigo-900 uppercase mb-1">Application Date</label>
+                              <input
+                                type="date"
+                                required={needsReapplicationDetails && reapplicationData.isTemporary}
+                                className="w-full p-2.5 bg-white border border-indigo-200 rounded-xl text-sm"
+                                value={reapplicationData.tempApplicationDate}
+                                onChange={e => setReapplicationData({...reapplicationData, tempApplicationDate: e.target.value})}
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-[10px] font-bold text-indigo-900 uppercase mb-1">Follow-up Date (Max 30 days)</label>
+                              <input
+                                type="date"
+                                required={needsReapplicationDetails && reapplicationData.isTemporary}
+                                min={reapplicationData.tempApplicationDate}
+                                max={(() => {
+                                  if (!reapplicationData.tempApplicationDate) return '';
+                                  const d = new Date(reapplicationData.tempApplicationDate);
+                                  d.setDate(d.getDate() + 30);
+                                  return d.toISOString().split('T')[0];
+                                })()}
+                                className="w-full p-2.5 bg-white border border-indigo-200 rounded-xl text-sm"
+                                value={reapplicationData.draftFollowUpDate}
+                                onChange={e => setReapplicationData({...reapplicationData, draftFollowUpDate: e.target.value})}
+                              />
+                            </div>
+                          </div>
+                          {reapplicationData.tempApplicationDate && (
+                            <p className="text-[10px] text-indigo-600 font-medium italic">
+                              * The follow-up date is restricted between {reapplicationData.tempApplicationDate} and {(() => {
+                                const d = new Date(reapplicationData.tempApplicationDate);
+                                d.setDate(d.getDate() + 30);
+                                return d.toISOString().split('T')[0];
+                              })()} (max 30 days).
+                            </p>
+                          )}
                         </div>
-                        <div>
-                          <label className="block text-[10px] font-bold text-amber-900 uppercase mb-1">Application Number</label>
-                          <input
-                            type="text"
-                            required={needsReapplicationDetails}
-                            placeholder="NABH-202X-XXXX"
-                            className="w-full p-2.5 bg-white border border-amber-200 rounded-xl text-sm"
-                            value={reapplicationData.reapplicationNumber}
-                            onChange={e => setReapplicationData({...reapplicationData, reapplicationNumber: e.target.value})}
-                          />
+                      ) : (
+                        <div className="space-y-4 pt-2">
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="checkbox"
+                              id="modal-reapplied"
+                              className="w-4 h-4 rounded border-stone-300 text-stone-900 focus:ring-stone-900"
+                              checked={reapplicationData.reapplied}
+                              onChange={e => setReapplicationData({...reapplicationData, reapplied: e.target.checked})}
+                            />
+                            <label htmlFor="modal-reapplied" className="text-xs font-bold text-stone-700 uppercase">Confirm Reapplied for permanent renewal?</label>
+                          </div>
+
+                          {reapplicationData.reapplied && (
+                            <div className="grid grid-cols-2 gap-4 animate-in fade-in duration-200">
+                              <div>
+                                <label className="block text-[10px] font-bold text-amber-900 uppercase mb-1">Reapplication Program</label>
+                                <select
+                                  required={needsReapplicationDetails && !reapplicationData.isTemporary && reapplicationData.reapplied}
+                                  className="w-full p-2.5 bg-white border border-amber-200 rounded-xl text-sm"
+                                  value={reapplicationData.reapplicationProgram}
+                                  onChange={e => setReapplicationData({...reapplicationData, reapplicationProgram: e.target.value})}
+                                >
+                                  <option value="">Select Program</option>
+                                  <option value="HCO">HCO</option>
+                                  <option value="SHCO">SHCO</option>
+                                  <option value="ECO">ECO</option>
+                                  <option value="ELCP">ELCP</option>
+                                </select>
+                              </div>
+                              <div>
+                                <label className="block text-[10px] font-bold text-amber-900 uppercase mb-1">Application Number</label>
+                                <input
+                                  type="text"
+                                  required={needsReapplicationDetails && !reapplicationData.isTemporary && reapplicationData.reapplied}
+                                  placeholder="NABH-202X-XXXX"
+                                  className="w-full p-2.5 bg-white border border-amber-200 rounded-xl text-sm"
+                                  value={reapplicationData.reapplicationNumber}
+                                  onChange={e => setReapplicationData({...reapplicationData, reapplicationNumber: e.target.value})}
+                                />
+                              </div>
+                              <div className="col-span-2">
+                                <label className="block text-[10px] font-bold text-amber-900 uppercase mb-1">Renewal Application Date</label>
+                                <input
+                                  type="date"
+                                  required={needsReapplicationDetails && !reapplicationData.isTemporary && reapplicationData.reapplied}
+                                  className="w-full p-2.5 bg-white border border-amber-200 rounded-xl text-sm"
+                                  value={reapplicationData.reapplicationDate}
+                                  onChange={e => setReapplicationData({...reapplicationData, reapplicationDate: e.target.value})}
+                                />
+                              </div>
+                            </div>
+                          )}
+                          <p className="text-[10px] text-amber-600 italic leading-relaxed">
+                            * Note: Permanent details will be sent to the admin for verification.
+                          </p>
                         </div>
-                        <div className="col-span-2">
-                          <label className="block text-[10px] font-bold text-amber-900 uppercase mb-1">Renewal Application Date</label>
-                          <input
-                            type="date"
-                            required={needsReapplicationDetails}
-                            className="w-full p-2.5 bg-white border border-amber-200 rounded-xl text-sm"
-                            value={reapplicationData.reapplicationDate}
-                            onChange={e => setReapplicationData({...reapplicationData, reapplicationDate: e.target.value})}
-                          />
-                        </div>
-                      </div>
-                      <p className="text-[10px] text-amber-600 italic leading-relaxed">
-                        * Note: These details will be sent to the admin for verification.
-                      </p>
+                      )}
                     </div>
                   )}
 
@@ -1702,7 +1881,11 @@ function EditHospitalModal({ hospital, users, zones, currentUser, onClose }: {
     contactNumber: hospital.contactNumber || '',
     alternateNumber: hospital.alternateNumber || '',
     designation: hospital.designation || '',
-    status: hospital.status
+    status: hospital.status,
+    isTemporary: hospital.status === 'Draft' || !!hospital.tempApplicationNo,
+    tempApplicationNo: hospital.tempApplicationNo || '',
+    tempApplicationDate: hospital.tempApplicationDate ? format(parseISO(hospital.tempApplicationDate), 'yyyy-MM-dd') : '',
+    draftFollowUpDate: hospital.draftFollowUpDate ? format(parseISO(hospital.draftFollowUpDate), 'yyyy-MM-dd') : ''
   });
 
   const getUserZoneName = (userId: string) => {
@@ -1728,12 +1911,88 @@ function EditHospitalModal({ hospital, users, zones, currentUser, onClose }: {
     e.preventDefault();
     try {
       const dataToSave: any = { ...formData, applicationNo: formData.applicationNo.trim() };
-      if (!dataToSave.reapplied) {
-        dataToSave.reappliedProgram = '';
-        dataToSave.renewalApplicationNo = '';
-        dataToSave.renewalApplicationDate = '';
-      } else if (dataToSave.renewalApplicationDate) {
-        dataToSave.renewalApplicationDate = new Date(dataToSave.renewalApplicationDate).toISOString();
+      delete dataToSave.isTemporary;
+
+      if (formData.reapplied) {
+        if (formData.isTemporary) {
+          if (!formData.tempApplicationNo || !formData.reappliedProgram || !formData.tempApplicationDate || !formData.draftFollowUpDate) {
+            alert("Please fill in all temporary application details.");
+            return;
+          }
+          const appDate = new Date(formData.tempApplicationDate);
+          const fDate = new Date(formData.draftFollowUpDate);
+          const maxFDate = new Date(appDate);
+          maxFDate.setDate(maxFDate.getDate() + 30);
+          
+          if (fDate > maxFDate) {
+            alert("The draft follow-up date cannot be beyond 30 days from the temporary application date.");
+            return;
+          }
+          if (fDate < appDate) {
+            alert("The draft follow-up date cannot be before the temporary application date.");
+            return;
+          }
+
+          dataToSave.status = 'Draft';
+          dataToSave.reapplied = false;
+          dataToSave.tempApplicationNo = formData.tempApplicationNo;
+          dataToSave.tempApplicationDate = new Date(formData.tempApplicationDate).toISOString();
+          dataToSave.draftFollowUpDate = new Date(formData.draftFollowUpDate).toISOString();
+          dataToSave.nextFollowUpDate = new Date(formData.draftFollowUpDate).toISOString();
+          dataToSave.reappliedProgram = formData.reappliedProgram;
+          dataToSave.renewalApplicationNo = '';
+          dataToSave.renewalApplicationDate = '';
+        } else {
+          if (!formData.reappliedProgram || !formData.renewalApplicationNo || !formData.renewalApplicationDate) {
+            alert("Please fill in all renewal application details.");
+            return;
+          }
+          dataToSave.status = formData.status === 'Draft' ? 'Pending Renewal' : formData.status;
+          dataToSave.reapplied = true;
+          dataToSave.reappliedProgram = formData.reappliedProgram;
+          dataToSave.renewalApplicationNo = formData.renewalApplicationNo;
+          dataToSave.renewalApplicationDate = new Date(formData.renewalApplicationDate).toISOString();
+          dataToSave.tempApplicationNo = '';
+          dataToSave.tempApplicationDate = '';
+          dataToSave.draftFollowUpDate = '';
+        }
+      } else {
+        if (formData.status === 'Draft') {
+          if (!formData.tempApplicationNo || !formData.tempApplicationDate || !formData.draftFollowUpDate) {
+            alert("Draft status requires temporary application details. Please check 'Reapplied for Renewal' and fill in Temporary details, or choose another status.");
+            return;
+          }
+          const appDate = new Date(formData.tempApplicationDate);
+          const fDate = new Date(formData.draftFollowUpDate);
+          const maxFDate = new Date(appDate);
+          maxFDate.setDate(maxFDate.getDate() + 30);
+          
+          if (fDate > maxFDate) {
+            alert("The draft follow-up date cannot be beyond 30 days from the temporary application date.");
+            return;
+          }
+          if (fDate < appDate) {
+            alert("The draft follow-up date cannot be before the temporary application date.");
+            return;
+          }
+
+          dataToSave.reapplied = false;
+          dataToSave.tempApplicationNo = formData.tempApplicationNo;
+          dataToSave.tempApplicationDate = new Date(formData.tempApplicationDate).toISOString();
+          dataToSave.draftFollowUpDate = new Date(formData.draftFollowUpDate).toISOString();
+          dataToSave.nextFollowUpDate = new Date(formData.draftFollowUpDate).toISOString();
+          dataToSave.reappliedProgram = formData.reappliedProgram;
+          dataToSave.renewalApplicationNo = '';
+          dataToSave.renewalApplicationDate = '';
+        } else {
+          dataToSave.reapplied = false;
+          dataToSave.reappliedProgram = '';
+          dataToSave.renewalApplicationNo = '';
+          dataToSave.renewalApplicationDate = '';
+          dataToSave.tempApplicationNo = '';
+          dataToSave.tempApplicationDate = '';
+          dataToSave.draftFollowUpDate = '';
+        }
       }
       
       await updateDoc(doc(db, 'hospitals', hospital.id), dataToSave);
@@ -1787,11 +2046,19 @@ function EditHospitalModal({ hospital, users, zones, currentUser, onClose }: {
               <select
                 className="w-full p-3 bg-stone-50 border-none rounded-xl text-sm"
                 value={formData.status}
-                onChange={e => setFormData({...formData, status: e.target.value as any})}
+                onChange={e => {
+                  const newStatus = e.target.value as any;
+                  if (newStatus === 'Draft') {
+                    setFormData(prev => ({ ...prev, status: newStatus, reapplied: true, isTemporary: true }));
+                  } else {
+                    setFormData(prev => ({ ...prev, status: newStatus }));
+                  }
+                }}
               >
                 <option value="Active">Active</option>
                 <option value="Expired">Expired</option>
                 <option value="Pending Renewal">Pending Renewal</option>
+                <option value="Draft">Draft</option>
               </select>
             </div>
             <div>
@@ -1922,38 +2189,145 @@ function EditHospitalModal({ hospital, users, zones, currentUser, onClose }: {
             </div>
 
             {formData.reapplied && (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
+              <div className="space-y-4 pt-2">
                 <div>
-                  <label className="block text-xs font-bold text-stone-400 uppercase mb-1">Reapplied Program</label>
-                  <select
-                    className="w-full p-3 bg-white border border-stone-200 rounded-xl text-sm"
-                    value={formData.reappliedProgram}
-                    onChange={e => setFormData({...formData, reappliedProgram: e.target.value})}
-                  >
-                    <option value="">Select Program</option>
-                    <option value="HCO">HCO</option>
-                    <option value="SHCO">SHCO</option>
-                    <option value="ECO">ECO</option>
-                    <option value="ELCP">ELCP</option>
-                  </select>
+                  <label className="block text-[10px] font-bold text-stone-500 uppercase mb-2 tracking-wider">Application Type</label>
+                  <div className="flex gap-4 p-1 bg-white rounded-xl border border-stone-200">
+                    <button
+                      type="button"
+                      onClick={() => setFormData(prev => ({ ...prev, isTemporary: true }))}
+                      className={cn(
+                        "flex-1 py-2 text-xs font-bold rounded-lg transition-all",
+                        formData.isTemporary 
+                          ? "bg-indigo-600 text-white shadow-sm" 
+                          : "text-stone-600 hover:text-stone-900"
+                      )}
+                    >
+                      Temporary (Draft)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setFormData(prev => ({ ...prev, isTemporary: false }))}
+                      className={cn(
+                        "flex-1 py-2 text-xs font-bold rounded-lg transition-all",
+                        !formData.isTemporary 
+                          ? "bg-stone-900 text-white shadow-sm" 
+                          : "text-stone-600 hover:text-stone-900"
+                      )}
+                    >
+                      Permanent (Final)
+                    </button>
+                  </div>
                 </div>
-                <div>
-                  <label className="block text-xs font-bold text-stone-400 uppercase mb-1">Renewal App No</label>
-                  <input
-                    className="w-full p-3 bg-white border border-stone-200 rounded-xl text-sm"
-                    value={formData.renewalApplicationNo}
-                    onChange={e => setFormData({...formData, renewalApplicationNo: e.target.value})}
-                  />
-                </div>
-                <div className="md:col-span-2">
-                  <label className="block text-xs font-bold text-stone-400 uppercase mb-1">Renewal App Date</label>
-                  <input
-                    type="date"
-                    className="w-full p-3 bg-white border border-stone-200 rounded-xl text-sm"
-                    value={formData.renewalApplicationDate}
-                    onChange={e => setFormData({...formData, renewalApplicationDate: e.target.value})}
-                  />
-                </div>
+
+                {formData.isTemporary ? (
+                  <div className="p-4 bg-indigo-50/50 rounded-2xl border border-indigo-100 space-y-4 animate-in zoom-in-95 duration-200">
+                    <p className="text-xs font-bold text-indigo-900 uppercase">Temporary Application Details (Draft/Portal)</p>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-xs font-bold text-indigo-900 uppercase mb-1">Temp Application No</label>
+                        <input
+                          required={formData.reapplied && formData.isTemporary}
+                          placeholder="e.g. TEMP-12345"
+                          className="w-full p-3 bg-white border border-indigo-200 rounded-xl text-sm"
+                          value={formData.tempApplicationNo}
+                          onChange={e => setFormData({...formData, tempApplicationNo: e.target.value})}
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-bold text-indigo-900 uppercase mb-1">Program Name</label>
+                        <select
+                          required={formData.reapplied && formData.isTemporary}
+                          className="w-full p-3 bg-white border border-indigo-200 rounded-xl text-sm"
+                          value={formData.reappliedProgram}
+                          onChange={e => setFormData({...formData, reappliedProgram: e.target.value})}
+                        >
+                          <option value="">Select Program</option>
+                          <option value="HCO">HCO</option>
+                          <option value="SHCO">SHCO</option>
+                          <option value="ECO">ECO</option>
+                          <option value="ELCP">ELCP</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-xs font-bold text-indigo-900 uppercase mb-1">Application Date</label>
+                        <input
+                          type="date"
+                          required={formData.reapplied && formData.isTemporary}
+                          className="w-full p-3 bg-white border border-indigo-200 rounded-xl text-sm"
+                          value={formData.tempApplicationDate}
+                          onChange={e => setFormData({...formData, tempApplicationDate: e.target.value})}
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-bold text-indigo-900 uppercase mb-1">Follow-up Date (Max 30 days)</label>
+                        <input
+                          type="date"
+                          required={formData.reapplied && formData.isTemporary}
+                          min={formData.tempApplicationDate}
+                          max={(() => {
+                            if (!formData.tempApplicationDate) return '';
+                            const d = new Date(formData.tempApplicationDate);
+                            d.setDate(d.getDate() + 30);
+                            return d.toISOString().split('T')[0];
+                          })()}
+                          className="w-full p-3 bg-white border border-indigo-200 rounded-xl text-sm"
+                          value={formData.draftFollowUpDate}
+                          onChange={e => setFormData({...formData, draftFollowUpDate: e.target.value})}
+                        />
+                      </div>
+                    </div>
+                    {formData.tempApplicationDate && (
+                      <p className="text-[10px] text-indigo-600 font-medium italic">
+                        * The follow-up date is restricted between {formData.tempApplicationDate} and {(() => {
+                          const d = new Date(formData.tempApplicationDate);
+                          d.setDate(d.getDate() + 30);
+                          return d.toISOString().split('T')[0];
+                        })()} (max 30 days).
+                      </p>
+                    )}
+                  </div>
+                ) : (
+                  <div className="p-4 bg-amber-50/50 rounded-2xl border border-amber-200 space-y-4 animate-in zoom-in-95 duration-200">
+                    <p className="text-xs font-bold text-amber-900 uppercase">Permanent Renewal Details (Final)</p>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-xs font-bold text-amber-950 uppercase mb-1">Reapplied Program</label>
+                        <select
+                          required={formData.reapplied && !formData.isTemporary}
+                          className="w-full p-3 bg-white border border-amber-200 rounded-xl text-sm"
+                          value={formData.reappliedProgram}
+                          onChange={e => setFormData({...formData, reappliedProgram: e.target.value})}
+                        >
+                          <option value="">Select Program</option>
+                          <option value="HCO">HCO</option>
+                          <option value="SHCO">SHCO</option>
+                          <option value="ECO">ECO</option>
+                          <option value="ELCP">ELCP</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-xs font-bold text-amber-950 uppercase mb-1">Renewal App No</label>
+                        <input
+                          required={formData.reapplied && !formData.isTemporary}
+                          className="w-full p-3 bg-white border border-amber-200 rounded-xl text-sm"
+                          value={formData.renewalApplicationNo}
+                          onChange={e => setFormData({...formData, renewalApplicationNo: e.target.value})}
+                        />
+                      </div>
+                      <div className="md:col-span-2">
+                        <label className="block text-xs font-bold text-amber-950 uppercase mb-1">Renewal App Date</label>
+                        <input
+                          type="date"
+                          required={formData.reapplied && !formData.isTemporary}
+                          className="w-full p-3 bg-white border border-amber-200 rounded-xl text-sm"
+                          value={formData.renewalApplicationDate}
+                          onChange={e => setFormData({...formData, renewalApplicationDate: e.target.value})}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -1997,7 +2371,10 @@ function AddHospitalModal({ users, hospitals, zones, currentUser, onClose }: { u
     contactPerson: '',
     contactNumber: '',
     alternateNumber: '',
-    designation: ''
+    designation: '',
+    tempApplicationNo: '',
+    tempApplicationDate: '',
+    draftFollowUpDate: ''
   });
 
   const getUserZoneName = (userId: string) => {
@@ -2039,6 +2416,20 @@ function AddHospitalModal({ users, hospitals, zones, currentUser, onClose }: { u
         delete dataToSave.renewalApplicationDate;
       } else if (dataToSave.renewalApplicationDate) {
         dataToSave.renewalApplicationDate = new Date(dataToSave.renewalApplicationDate).toISOString();
+      }
+
+      if (dataToSave.status !== 'Draft') {
+        delete dataToSave.tempApplicationNo;
+        delete dataToSave.tempApplicationDate;
+        delete dataToSave.draftFollowUpDate;
+      } else {
+        if (dataToSave.tempApplicationDate) {
+          dataToSave.tempApplicationDate = new Date(dataToSave.tempApplicationDate).toISOString();
+        }
+        if (dataToSave.draftFollowUpDate) {
+          dataToSave.draftFollowUpDate = new Date(dataToSave.draftFollowUpDate).toISOString();
+          dataToSave.nextFollowUpDate = new Date(dataToSave.draftFollowUpDate).toISOString();
+        }
       }
       
       const docRef = await addDoc(collection(db, 'hospitals'), dataToSave);
@@ -2092,6 +2483,19 @@ function AddHospitalModal({ users, hospitals, zones, currentUser, onClose }: { u
                 value={formData.applicationNo}
                 onChange={e => setFormData({...formData, applicationNo: e.target.value})}
               />
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-stone-400 uppercase mb-1">Status</label>
+              <select
+                className="w-full p-3 bg-stone-50 border-none rounded-xl text-sm"
+                value={formData.status}
+                onChange={e => setFormData({...formData, status: e.target.value as any})}
+              >
+                <option value="Active">Active</option>
+                <option value="Expired">Expired</option>
+                <option value="Pending Renewal">Pending Renewal</option>
+                <option value="Draft">Draft</option>
+              </select>
             </div>
             <div>
               <label className="block text-xs font-bold text-stone-400 uppercase mb-1">Assigned To</label>
@@ -2256,6 +2660,47 @@ function AddHospitalModal({ users, hospitals, zones, currentUser, onClose }: { u
               </div>
             )}
           </div>
+
+          {formData.status === 'Draft' && (
+            <div className="p-4 bg-indigo-50/50 rounded-2xl border border-indigo-100 space-y-4 animate-in zoom-in-95 duration-200">
+              <p className="text-xs font-bold text-indigo-900 uppercase flex items-center gap-1.5">
+                <span className="w-2 h-2 rounded-full bg-indigo-500 animate-pulse" />
+                Draft/Temporary Application Details (From Portal)
+              </p>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-bold text-indigo-900 uppercase mb-1">Temp Application No</label>
+                  <input
+                    required={formData.status === 'Draft'}
+                    placeholder="e.g. TEMP-12345"
+                    className="w-full p-3 bg-white border border-indigo-200 rounded-xl text-sm focus:ring-1 focus:ring-indigo-300 outline-none"
+                    value={formData.tempApplicationNo}
+                    onChange={e => setFormData({...formData, tempApplicationNo: e.target.value})}
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-indigo-900 uppercase mb-1">Temp Application Date</label>
+                  <input
+                    type="date"
+                    required={formData.status === 'Draft'}
+                    className="w-full p-3 bg-white border border-indigo-200 rounded-xl text-sm focus:ring-1 focus:ring-indigo-300 outline-none"
+                    value={formData.tempApplicationDate}
+                    onChange={e => setFormData({...formData, tempApplicationDate: e.target.value})}
+                  />
+                </div>
+                <div className="md:col-span-2">
+                  <label className="block text-xs font-bold text-indigo-900 uppercase mb-1">Draft Follow-up Date</label>
+                  <input
+                    type="date"
+                    required={formData.status === 'Draft'}
+                    className="w-full p-3 bg-white border border-indigo-200 rounded-xl text-sm focus:ring-1 focus:ring-indigo-300 outline-none"
+                    value={formData.draftFollowUpDate}
+                    onChange={e => setFormData({...formData, draftFollowUpDate: e.target.value})}
+                  />
+                </div>
+              </div>
+            </div>
+          )}
 
           <div className="flex gap-3 pt-4">
             <button 
