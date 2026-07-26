@@ -150,9 +150,39 @@
         }
       },
       "required": ["itemId", "collection", "userId", "userName", "userEmail", "action", "timestamp", "changes"]
+    },
+    "Resource": {
+      "title": "Team Resource",
+      "description": "Uploaded document, study, or NABH knowledge resource",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "category": { "type": "string" },
+        "version": { "type": "string" },
+        "fileName": { "type": "string" },
+        "fileType": { "type": "string" },
+        "fileSize": { "type": "string" },
+        "fileData": { "type": "string" },
+        "createdBy": { "type": "string" },
+        "createdByName": { "type": "string" },
+        "createdByRole": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" },
+        "updatedBy": { "type": "string" },
+        "updatedByName": { "type": "string" },
+        "tags": { "type": "array", "items": { "type": "string" } },
+        "downloadCount": { "type": "number" }
+      },
+      "required": ["title", "category", "version", "createdBy", "createdByName", "createdAt", "updatedAt"]
     }
   },
   "firestore": {
+    "resources/{resourceId}": {
+      "schema": "Resource",
+      "description": "Team study documents and knowledge resources"
+    },
     "audit_logs/{id}": {
       "schema": "AuditLog",
       "description": "System-wide data change logs"

@@ -117,3 +117,24 @@ export interface AuditLog {
     newValue: any;
   }[];
 }
+
+export interface TeamResource {
+  id: string;
+  title: string;
+  description: string;
+  category: 'NABH Guidelines' | 'Studies & Research' | 'SOPs & Manuals' | 'Templates & Checklists' | 'Reports & Presentations' | 'Other' | string;
+  version: string;
+  fileName: string;
+  fileType: string;
+  fileSize?: string;
+  fileData?: string; // Base64 or URL
+  createdBy: string;
+  createdByName: string;
+  createdByRole?: string;
+  createdAt: string;
+  updatedAt: string;
+  updatedBy?: string;
+  updatedByName?: string;
+  tags?: string[];
+  downloadCount?: number;
+}

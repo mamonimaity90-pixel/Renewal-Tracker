@@ -67,6 +67,10 @@ service cloud.firestore {
       allow write: if isAdmin();
     }
 
+    match /resources/{resourceId} {
+      allow read, write: if isApproved();
+    }
+
     // Default deny for everything else
     match /{document=**} {
       allow read, write: if false;

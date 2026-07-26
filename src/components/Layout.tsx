@@ -11,7 +11,8 @@ import {
   Menu,
   X,
   TrendingUp,
-  History
+  History,
+  FolderOpen
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 
@@ -30,6 +31,7 @@ export function Layout({ user, onLogout, activeTab, setActiveTab, children }: La
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
     { id: 'performance', label: 'Performance', icon: TrendingUp },
     { id: 'hospitals', label: 'Hospitals', icon: HospitalIcon },
+    { id: 'resources', label: 'Resources', icon: FolderOpen },
     { id: 'logs', label: 'Activity Logs', icon: ClipboardList },
     ...(user.role === 'admin' ? [
       { id: 'verification', label: 'Verification', icon: ClipboardCheck },

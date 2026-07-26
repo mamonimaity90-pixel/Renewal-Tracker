@@ -22,6 +22,7 @@ import { VerificationQueue } from './components/VerificationQueue';
 import { AuditLogList } from './components/AuditLogList';
 import { ReportScheduler } from './components/ReportScheduler';
 import { SettingsManager } from './components/SettingsManager';
+import { ResourcesManager } from './components/ResourcesManager';
 import { LogIn, LogOut, Loader2, Mail, Lock, User as UserIcon, AlertCircle, Clock, Ban, AlertTriangle, RotateCw } from 'lucide-react';
 
 export default function App() {
@@ -32,7 +33,7 @@ export default function App() {
   const [applications, setApplications] = useState<Application[]>([]);
   const [zones, setZones] = useState<Zone[]>([]);
   const [users, setUsers] = useState<User[]>([]);
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'performance' | 'hospitals' | 'team' | 'verification' | 'logs' | 'settings'>('dashboard');
+  const [activeTab, setActiveTab] = useState<string>('dashboard');
   const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [authMode, setAuthMode] = useState<'login' | 'signup' | 'google'>('google');
   const [email, setEmail] = useState('');
@@ -591,6 +592,9 @@ export default function App() {
           zones={zones}
           currentUser={user}
         />
+      )}
+      {activeTab === 'resources' && (
+        <ResourcesManager currentUser={user} />
       )}
       {activeTab === 'team' && user.role === 'admin' && (
         <TeamManagement users={users} zones={zones} />
